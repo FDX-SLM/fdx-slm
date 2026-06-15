@@ -19,7 +19,12 @@ import typer
 from rich.console import Console
 
 from slm_coach.config import load_eval_config
-from slm_coach.eval.headtohead import build_headtohead_markdown, head_to_head, load_per_sample
+from slm_coach.eval.headtohead import (
+    build_headtohead_markdown,
+    head_to_head,
+    load_per_sample,
+    write_headtohead_csv,
+)
 from slm_coach.eval.judge import MockJudge, build_judges, judge_usage
 from slm_coach.utils.logging import configure_logging, get_logger
 from slm_coach.utils.runtime import bootstrap
@@ -59,8 +64,10 @@ def main(
     )
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(markdown, encoding="utf-8")
+    csv_out = out.with_suffix(".csv")
+    write_headtohead_csv(result, csv_out)
     console.print(markdown)
-    console.print(f"[green]Head-to-head written to {out}[/green]")
+    console.print(f"[green]Head-to-head written to {out} (+ {csv_out})[/green]")
 
 
 if __name__ == "__main__":

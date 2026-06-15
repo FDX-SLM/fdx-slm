@@ -112,3 +112,32 @@ def build_headtohead_markdown(
             "",
         ]
     return "\n".join(lines) + "\n"
+
+
+def write_headtohead_csv(result: dict[str, Any], out_path: str | Path) -> Path:
+    """Write the head-to-head win/tie/loss table as a flat CSV (overall + one row per mode).
+
+    Columns: ``slice, a_win_pct, tie_pct, b_win_pct, n`` (``a_win`` = A judged better than B).
+    """
+
+    def _row(slice_name: str, winrate: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "slice": slice_name,
+            "a_win_pct": round(float(winrate.get("win", 0.0)) * 100, 1),
+            "tie_pct": round(float(winrate.get("tie", 0.0)) * 100, 1),
+            "b_win_pct": round(float(winrate.get("loss", 0.0)) * 100, 1),
+            "n": int(winrate.get("n", 0)),
+        }
+
+    rows = [_row("overall", result.get("overall", {}))]
+    rows += [_row(mode, winrate) for mode, winrate in result.get("per_mode", {}).items()]
+    out = Path(out_path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with out.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(
+            handle, fieldnames=["slice", "a_win_pct", "tie_pct", "b_win_pct", "n"]
+        )
+        writer.writeheader()
+        writer.writerows(rows)
+    logger.info("Wrote head-to-head CSV", extra={"path": str(out), "rows": len(rows)})
+    return out

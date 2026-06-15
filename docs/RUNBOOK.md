@@ -54,6 +54,10 @@ uv run python scripts/validate_data.py --data-dir data --report outputs/data_rep
 
 **Nhiệm vụ:** baseline rẻ + smoke-test toàn pipeline trước khi train bản thật.
 ```bash
+
+**Chạy Smoke để test trước**
+uv run python scripts/train_sft.py --config configs/sft_lora_smoke.yaml
+
 uv run python scripts/train_sft.py --config configs/sft_lora.yaml          # thêm --dry-run để duyệt
 # Mồi siêu nhỏ trên GPU (model 1.5B, ~60 bước) để chắc pipeline chạy:
 # uv run python scripts/train_sft.py --config configs/sft_lora_smoke.yaml
@@ -128,7 +132,7 @@ uv run python scripts/compare_baselines.py --report outputs/eval/eval_sft/report
 → Quy trình đầy đủ + lệnh ở **[docs/BASELINES.md](BASELINES.md)**. Tóm tắt:
 ```bash
 # eval model mẹ zero-shot (không train) để biết fine-tune nâng được bao nhiêu
-uv run python scripts/evaluate.py --config configs/eval.yaml --model Qwen/Qwen3-8B --run-name eval_base_qwen3_8b
+uv run python scripts/evaluate.py --config configs/eval.yaml --model Qwen/Qwen3.5-9B --run-name eval_base_qwen3_8b
 uv run python scripts/compare_baselines.py      # gộp mọi report thành 1 bảng xếp hạng
 ```
 **Vì sao tách riêng:** đây là nghiên cứu so sánh, không nằm trên đường "tạo 1 model". Chạy khi muốn chọn công thức tốt nhất / báo cáo benchmark.
@@ -163,7 +167,8 @@ uv run python scripts/export_model.py \
 
 ## Xuyên suốt — Metrics, biểu đồ, theo dõi
 
-- **Tự động:** mỗi lần train ghi `checkpoints/<run>/metrics/` (`training_log.csv`, `loss_curve.png`, `eval_metric.png`, `lr_schedule.png`); mỗi lần eval ghi CSV + PNG cạnh `report.md`.
+- **Tự động:** mỗi lần train ghi `checkpoints/<run>/metrics/` (`training_log.csv`, `loss_curve.png`, `eval_metric.png`, `lr_schedule.png`); mỗi lần eval ghi CSV + PNG cạnh `report.md`. **Train và eval ghi ở hai thư mục khác nhau** (`checkpoints/` vs `outputs/eval/`) — chạy `train_*.py` *không* sinh `outputs/eval/`.
+- **Cách đọc từng con số** (cột nào nghĩa gì, score_5 vs score_10, nhìn đâu để kết luận): **[docs/METRICS.md](METRICS.md)**.
 - **Vẽ lại** từ một run đã xong: `uv run python scripts/plot_metrics.py --run-dir checkpoints/align_dpo` (hoặc `--report outputs/eval/<run>/report.json`).
 - **Langfuse** (tùy chọn): bật `tracking.langfuse` + `LANGFUSE_*` trong `.env` → log sample generation lúc eval-during-training.
 
@@ -183,4 +188,4 @@ uv run python scripts/export_model.py \
 | 6 | `evaluate.py --model checkpoints/align_dpo/best --run-name eval_dpo` | report DPO |
 | 8 | `export_model.py --checkpoint checkpoints/align_dpo/best --formats awq,gguf` | model triển khai |
 
-**Tài liệu liên quan:** [README.md](../README.md) (cài đặt nhanh) · [docs/SPEC.md](SPEC.md) (thiết kế) · [docs/BASELINES.md](BASELINES.md) (so sánh recipe + benchmark mẹ).
+**Tài liệu liên quan:** [README.md](../README.md) (cài đặt nhanh) · [docs/SPEC.md](SPEC.md) (thiết kế) · [docs/BASELINES.md](BASELINES.md) (so sánh recipe + benchmark mẹ) · [docs/METRICS.md](METRICS.md) (đọc hiểu số liệu).

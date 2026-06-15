@@ -113,7 +113,7 @@ tests/          unit tests (no GPU / no API keys)
 
 > Everything runs through `uv`. `uv run <cmd>` executes `<cmd>` inside the project's virtual environment. You never need to manually activate a venv.
 >
-> For a linear, *why-in-this-order* walkthrough of the whole pipeline see **[docs/RUNBOOK.md](docs/RUNBOOK.md)**; for comparing recipes + benchmarking vs the parent model see **[docs/BASELINES.md](docs/BASELINES.md)**.
+> For a linear, *why-in-this-order* walkthrough of the whole pipeline see **[docs/RUNBOOK.md](docs/RUNBOOK.md)**; for comparing recipes + benchmarking vs the parent model see **[docs/BASELINES.md](docs/BASELINES.md)**; for how to read every metric file (what each column means, score_5 vs score_10) see **[docs/METRICS.md](docs/METRICS.md)**.
 
 ### Step 0 — One-time setup
 

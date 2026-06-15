@@ -23,6 +23,7 @@ from slm_coach.reporting.compare import (
     find_reports,
     load_reports,
     write_comparison,
+    write_comparison_csv,
 )
 from slm_coach.utils.logging import configure_logging, get_logger
 from slm_coach.utils.runtime import bootstrap
@@ -54,8 +55,10 @@ def main(
         raise typer.Exit(code=1)
     reports = load_reports(paths)
     write_comparison(reports, out)
+    csv_out = out.with_suffix(".csv")
+    write_comparison_csv(reports, csv_out)
     console.print(build_leaderboard(reports))
-    console.print(f"[green]Leaderboard written to {out}[/green]")
+    console.print(f"[green]Leaderboard written to {out} (+ {csv_out})[/green]")
 
 
 if __name__ == "__main__":
