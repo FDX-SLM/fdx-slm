@@ -37,6 +37,7 @@ sft:
   train_on_responses_only: true
   multiturn_masking: true
   packing: false
+  val_split: 0.05                  # giữ 5% record làm eval HELD-OUT thật (đo eval_loss ngoài mẫu)
   save_steps: 100                  # checkpoint_steps (checkpoint_strategy: steps)
   eval_steps: 100                  # eval_steps (eval_strategy: steps)
   logging_steps: 10                # logging_steps
