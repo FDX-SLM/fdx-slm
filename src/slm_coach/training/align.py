@@ -8,6 +8,7 @@ the preference data and logs the plan without a GPU.
 
 from __future__ import annotations
 
+import dataclasses
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -23,6 +24,32 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from slm_coach.config import AlignFileConfig
 
 logger = get_logger(__name__)
+
+
+def _valid_kwargs(config_cls: type, kwargs: dict[str, Any]) -> dict[str, Any]:
+    """Keep only kwargs the dataclass ``config_cls`` accepts; log any dropped (TRL API drift).
+
+    TRL renames/removes config fields across versions (e.g. ``DPOConfig`` dropped
+    ``max_prompt_length``). Filtering here keeps the trainer construction working across versions
+    instead of crashing on an unexpected keyword.
+    """
+    valid = {f.name for f in dataclasses.fields(config_cls)}
+    dropped = sorted(set(kwargs) - valid)
+    if dropped:
+        logger.warning(
+            "Dropping config kwargs unsupported by this TRL version",
+            extra={"config": config_cls.__name__, "dropped": dropped},
+        )
+    return {k: v for k, v in kwargs.items() if k in valid}
+
+
+def _resolve_orpo(trl: Any) -> tuple[type, type]:
+    """Return ``(ORPOConfig, ORPOTrainer)`` (moved to ``trl.experimental.orpo`` in newer TRL)."""
+    if hasattr(trl, "ORPOConfig") and hasattr(trl, "ORPOTrainer"):
+        return trl.ORPOConfig, trl.ORPOTrainer
+    from trl.experimental.orpo import ORPOConfig, ORPOTrainer
+
+    return ORPOConfig, ORPOTrainer
 
 
 def run_alignment(
@@ -95,6 +122,20 @@ def _run_align_core(
     )
     tracker = init_tracking(config, run_name=config.run_name)
 
+    # Best-checkpoint: hold out a small preference eval split, select best by eval_loss
+    # (alignment has no rubric callback, so eval_loss is the selection metric).
+    eval_dataset = None
+    load_best = config.train.load_best_model_at_end
+    if load_best and len(dataset) >= 20:
+        split = dataset.train_test_split(test_size=0.1, seed=config.seed)
+        dataset, eval_dataset = split["train"], split["test"]
+    elif load_best:
+        logger.warning(
+            "Too few preference pairs for an eval split; disabling load_best_model_at_end",
+            extra={"n": len(dataset)},
+        )
+        load_best = False
+
     common = {
         "output_dir": str(output_dir),
         "num_train_epochs": config.align.epochs,
@@ -105,6 +146,12 @@ def _run_align_core(
         "max_length": config.align.max_length,
         "max_prompt_length": config.align.max_prompt_length,
         "warmup_ratio": config.train.warmup_ratio,
+        "weight_decay": config.train.weight_decay,
+        "lr_scheduler_type": config.train.lr_scheduler_type,
+        "max_grad_norm": config.train.max_grad_norm,
+        "optim": config.train.optim,
+        "gradient_checkpointing": config.train.gradient_checkpointing,
+        "use_liger_kernel": config.train.use_liger_kernel,
         "logging_steps": config.train.logging_steps,
         "save_strategy": "steps",
         "save_steps": config.train.save_steps,
@@ -113,18 +160,41 @@ def _run_align_core(
         "report_to": [],
         **precision_kwargs(),
     }
+    if load_best and eval_dataset is not None:
+        common.update(
+            {
+                "eval_strategy": "steps",
+                "eval_steps": config.train.eval_steps,
+                "load_best_model_at_end": True,
+                "metric_for_best_model": "loss",  # eval_loss (lower is better)
+                "greater_is_better": False,
+            }
+        )
     if method == "orpo":
-        args = trl.ORPOConfig(**common)
-        trainer = trl.ORPOTrainer(
-            model=loaded.model, args=args, train_dataset=dataset, processing_class=loaded.tokenizer
+        orpo_config_cls, orpo_trainer_cls = _resolve_orpo(trl)
+        args = orpo_config_cls(**_valid_kwargs(orpo_config_cls, common))
+        trainer = orpo_trainer_cls(
+            model=loaded.model,
+            args=args,
+            train_dataset=dataset,
+            eval_dataset=eval_dataset,
+            processing_class=loaded.tokenizer,
         )
     else:
-        args = trl.DPOConfig(**common)
+        # DPO-specific loss controls (not part of ORPO's fixed loss).
+        dpo_kwargs = {
+            "loss_type": config.align.loss_type,
+            "label_smoothing": config.align.label_smoothing,
+        }
+        if config.align.rpo_alpha is not None:
+            dpo_kwargs["rpo_alpha"] = config.align.rpo_alpha
+        args = trl.DPOConfig(**_valid_kwargs(trl.DPOConfig, {**common, **dpo_kwargs}))
         trainer = trl.DPOTrainer(
             model=loaded.model,
             ref_model=None,  # PEFT: reference is the adapter-disabled base
             args=args,
             train_dataset=dataset,
+            eval_dataset=eval_dataset,
             processing_class=loaded.tokenizer,
         )
     trainer.add_callback(

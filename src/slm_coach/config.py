@@ -93,7 +93,7 @@ class ModelRuntimeConfig(_Base):
     """Base-model loading options."""
 
     max_seq_len: int = 4096
-    attn_implementation: str = "flash_attention_2"
+    attn_implementation: str = "sdpa"  # sdpa works everywhere; set flash_attention_2 if installed
     use_unsloth: bool = True
     dtype: str = "bfloat16"
 
@@ -120,6 +120,10 @@ class TrainControlConfig(_Base):
     weight_decay: float = 0.0
     lr_scheduler_type: str = "cosine"
     max_seq_len: int = 4096
+    max_grad_norm: float = 1.0  # gradient clipping
+    optim: str = "adamw_torch"  # HF optimizer id (e.g. adamw_torch, adamw_torch_fused, adamw_8bit)
+    gradient_checkpointing: bool = True  # trade compute for memory
+    use_liger_kernel: bool = False  # Liger fused kernels (needs the `liger-kernel` package)
 
 
 class SFTParams(TrainControlConfig):
@@ -133,6 +137,9 @@ class SFTParams(TrainControlConfig):
     train_on_responses_only: bool = True
     multiturn_masking: bool = True
     packing: bool = False
+    # Fraction of training records held out as a TRUE out-of-sample eval set (never trained on),
+    # so eval_loss is meaningful and overfit is visible. 0.0 keeps the legacy in-sample behavior.
+    val_split: float = 0.0
     mixture: MixtureConfig = Field(default_factory=MixtureConfig)
 
 
@@ -185,12 +192,15 @@ class SFTFileConfig(BaseConfig):
 class AlignParams(_Base):
     """Alignment hyperparameters (method selected here, never hardcoded)."""
 
-    method: Literal["dpo", "orpo"] = "orpo"
-    beta: float = 0.1
+    method: Literal["dpo", "orpo"] = "dpo"
+    beta: float = 0.1  # pref_beta: KL/preference strength
     lr: float = 5.0e-6
     epochs: int = 1
     max_length: int = 2048
     max_prompt_length: int = 1024
+    loss_type: str = "sigmoid"  # DPO loss variant: sigmoid (vanilla DPO), ipo, hinge, ...
+    label_smoothing: float = 0.0  # DPO label smoothing (cDPO); 0 = off
+    rpo_alpha: float | None = None  # pref_ftx: weight of the SFT/NLL term added to DPO; None = off
 
 
 class AlignFileConfig(BaseConfig):
@@ -236,6 +246,9 @@ class EvalFileConfig(BaseConfig):
     generation: GenerationConfig = Field(default_factory=GenerationConfig)
     per_mode_breakdown: bool = True
     pairwise: bool = False  # also compare each answer against the gold reference (A/B win-rate)
+    # Production coach system prompt injected into every gold prompt (so eval matches what the
+    # deployed model sees). Applied uniformly to the model under test and any baseline/parent.
+    system_prompt: str | None = None
 
     @field_validator("judges")
     @classmethod

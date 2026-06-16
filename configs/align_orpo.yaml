@@ -16,7 +16,7 @@ quant:
 
 model:
   max_seq_len: 4096
-  attn_implementation: "flash_attention_2"
+  attn_implementation: "sdpa"
   use_unsloth: true
   dtype: "bfloat16"
 

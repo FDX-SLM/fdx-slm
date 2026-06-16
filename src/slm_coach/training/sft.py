@@ -11,6 +11,7 @@ GPU; the no-GPU ``dry_run`` path exercises data loading/formatting/mixing and th
 
 from __future__ import annotations
 
+import random
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -32,6 +33,39 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from slm_coach.config import SFTFileConfig
 
 logger = get_logger(__name__)
+
+
+def split_holdout(records: list, val_split: float, seed: int) -> tuple[list, list]:
+    """Deterministically hold out a fraction of records as a true out-of-sample eval set.
+
+    Args:
+        records: All training records for this pass.
+        val_split: Fraction (0-1) to hold out. ``<= 0`` disables the split.
+        seed: RNG seed for a reproducible shuffle.
+
+    Returns:
+        ``(train_records, val_records)``. Degrades to ``(records, [])`` (with a warning) when the
+        split would yield 0 validation rows or leave 0 training rows — so tiny/smoke datasets
+        keep working unchanged.
+    """
+    if val_split <= 0.0 or len(records) < 2:
+        return list(records), []
+    n_val = round(len(records) * val_split)
+    if n_val < 1 or n_val >= len(records):
+        logger.warning(
+            "val_split too small/large for dataset size; using in-sample eval fallback",
+            extra={"n_records": len(records), "val_split": val_split},
+        )
+        return list(records), []
+    shuffled = list(records)
+    random.Random(seed).shuffle(shuffled)
+    val_records = shuffled[:n_val]
+    train_records = shuffled[n_val:]
+    logger.info(
+        "Held out true validation split",
+        extra={"n_train": len(train_records), "n_val": len(val_records), "val_split": val_split},
+    )
+    return train_records, val_records
 
 
 def load_gold_subset(config: SFTFileConfig) -> list[dict[str, Any]]:
@@ -92,6 +126,10 @@ def _build_sft_args(config: SFTFileConfig, output_dir: Path, *, assistant_only_l
         "warmup_ratio": sft.warmup_ratio,
         "weight_decay": sft.weight_decay,
         "lr_scheduler_type": sft.lr_scheduler_type,
+        "max_grad_norm": sft.max_grad_norm,
+        "optim": sft.optim,
+        "gradient_checkpointing": sft.gradient_checkpointing,
+        "use_liger_kernel": sft.use_liger_kernel,
         "max_length": sft.max_seq_len,
         "logging_steps": sft.logging_steps,
         "save_strategy": "steps",
@@ -142,6 +180,7 @@ def run_sft_core(
     reasoning_thinking: bool = False,
     resume: str | Path | None = None,
     stage_name: str | None = None,
+    val_records: list | None = None,
 ) -> Path:
     """Train one SFT pass (shared by T1 and each curriculum stage) and save best + last.
 
@@ -155,6 +194,8 @@ def run_sft_core(
         reasoning_thinking: Whether reasoning records fold a ``<think>`` block.
         resume: Optional checkpoint to resume from.
         stage_name: Optional curriculum stage name (for tracking/logging).
+        val_records: True held-out records (never in ``train_records``) for an out-of-sample
+            ``eval_loss``. When ``None``/empty, falls back to the legacy in-sample slice.
 
     Returns:
         Path to the ``best`` checkpoint for this pass.
@@ -178,8 +219,16 @@ def run_sft_core(
         )
         assistant_only = False
 
-    eval_size = min(len(dataset), config.eval_during_training.subset_size) or 1
-    eval_dataset = dataset.select(range(min(eval_size, len(dataset))))
+    # Prefer a TRUE held-out eval set (out-of-sample) when provided; otherwise fall back to the
+    # legacy in-sample slice of the train set (eval_loss then only drives the eval cycle, not a
+    # generalization signal). Either way it's capped at subset_size to bound eval cost.
+    cap = config.eval_during_training.subset_size
+    if val_records:
+        val_dataset = to_sft_dataset(val_records, reasoning_thinking=reasoning_thinking)
+        eval_dataset = val_dataset.select(range(min(cap, len(val_dataset)) or 1))
+    else:
+        eval_size = min(len(dataset), cap) or 1
+        eval_dataset = dataset.select(range(min(eval_size, len(dataset))))
 
     callbacks: list[Any] = []
     if gold_records:
@@ -278,7 +327,8 @@ def run_sft_training(
         if sft_records
         else []
     )
-    train_records = list(mixed) + list(reasoning_records)
+    all_records = list(mixed) + list(reasoning_records)
+    train_records, val_records = split_holdout(all_records, config.sft.val_split, config.seed)
     gold_records = load_gold_subset(config)
 
     logger.info(
@@ -288,6 +338,7 @@ def run_sft_training(
             "n_sft": len(sft_records),
             "n_reasoning": len(reasoning_records),
             "n_train": len(train_records),
+            "n_val": len(val_records),
             "multiturn_masking": config.sft.multiturn_masking,
             "gold_subset": len(gold_records),
         },
@@ -299,5 +350,11 @@ def run_sft_training(
         return output_dir / "best"
 
     return run_sft_core(
-        config, train_records, gold_records, output_dir, init_from=config.model_name, resume=resume
+        config,
+        train_records,
+        gold_records,
+        output_dir,
+        init_from=config.model_name,
+        resume=resume,
+        val_records=val_records,
     )

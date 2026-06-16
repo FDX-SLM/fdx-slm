@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from slm_coach.data.loader import load_gold_cases
-from slm_coach.eval.judge import MockJudge, build_judges
+from slm_coach.eval.judge import MockJudge, build_judges, judge_usage
 from slm_coach.eval.metrics import (
     SampleScore,
     aggregate_by_mode,
@@ -39,6 +39,17 @@ def _mock_answer(reference: str) -> str:
     """Deterministic canned VN answer (offline mock generation)."""
     base = reference.strip() or "Dạ, em sẽ tư vấn giúp anh/chị ạ."
     return f"Dạ, em xin tư vấn ạ. {base}"
+
+
+def _with_system(prompt: list[dict[str, str]], system_prompt: str | None) -> list[dict[str, str]]:
+    """Prepend the production system prompt to a gold prompt (no-op if absent or already present).
+
+    Applied only to the **generation** input so the evaluated model behaves as in production;
+    the judges still see the user-facing request, not the coaching instructions.
+    """
+    if not system_prompt or any(m.get("role") == "system" for m in prompt):
+        return prompt
+    return [{"role": "system", "content": system_prompt}, *prompt]
 
 
 def _score_case(judges: list[Any], prompt_text: str, answer: str) -> tuple[dict[str, float], float]:
@@ -129,6 +140,7 @@ def run_evaluation(
     prompts = [c.prompt for c in cases]
     references = [c.reference for c in cases]
     modes = [c.mode for c in cases]
+    gen_prompts = [_with_system(p, config.system_prompt) for p in prompts]
 
     if mock:
         answers = [_mock_answer(r) for r in references]
@@ -137,7 +149,7 @@ def run_evaluation(
         from slm_coach.eval.inference import batch_generate, load_for_inference
 
         model, tokenizer = load_for_inference(model_path)
-        answers = batch_generate(model, tokenizer, prompts, config.generation)
+        answers = batch_generate(model, tokenizer, gen_prompts, config.generation)
         judges = build_judges(config.judges, config.judge_models)
 
     weights = config.rubric_weights or DEFAULT_WEIGHTS
@@ -178,8 +190,13 @@ def run_evaluation(
     }
     if config.pairwise and pairwise_votes:
         extras["pairwise_vs_reference"] = pairwise_winrate(pairwise_votes)
+    if config.system_prompt:
+        extras["system_prompt_used"] = True
+    usage = judge_usage(judges)
+    if usage["calls"]:
+        extras["judge_usage"] = usage
     if config.latency.measure and not mock:
-        extras["latency"] = _measure_latency(model, tokenizer, prompts, config)
+        extras["latency"] = _measure_latency(model, tokenizer, gen_prompts, config)
 
     baseline = _find_baseline(report_root)
     write_report(report_dir, breakdown=breakdown, extras=extras, baseline=baseline)

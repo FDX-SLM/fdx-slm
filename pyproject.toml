@@ -35,6 +35,8 @@ train = [
     "sentencepiece>=0.2",
     "einops>=0.8",
     "hf_xet>=1.0",
+    # Liger fused kernels (use_liger_kernel). Linux+CUDA only (needs triton); skipped on Windows.
+    "liger-kernel>=0.5; sys_platform == 'linux'",
 ]
 # --- Linux + CUDA ONLY. Do NOT install on Windows/CPU (no prebuilt wheels). ---
 gpu = [

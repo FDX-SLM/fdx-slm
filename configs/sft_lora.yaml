@@ -1,41 +1,48 @@
-# T1 — fast LoRA SFT baseline (16-bit LoRA, single stage). See docs/SPEC.md §1, §7.
+# T1 — LoRA SFT (single stage). Hyperparameters mapped from the FPT/LLaMA-Factory job config.
+# See docs/SPEC.md §1, §7.
 defaults: base.yaml
 
 run_name: "sft_lora"
+seed: 1308                         # seed
 
 lora:
-  r: 32
-  alpha: 64
-  dropout: 0.05
-  target_modules: "all-linear"
+  r: 32                            # lora_rank
+  alpha: 64                        # lora_alpha
+  dropout: 0.05                    # lora_dropout
+  target_modules: "all-linear"     # target_modules
   bias: "none"
 
 quant:
-  load_in_4bit: false             # T1 is plain LoRA, not QLoRA
+  load_in_4bit: false              # quantization_bit: none  (training_type: lora)
 
 model:
-  max_seq_len: 4096
-  attn_implementation: "flash_attention_2"
+  max_seq_len: 4096                # max_sequence_length
+  attn_implementation: "sdpa"   # default; đổi sang flash_attention_2 nếu đã cài flash-attn
   use_unsloth: true
-  dtype: "bfloat16"
+  dtype: "bfloat16"                # mixed_precision: bf16
 
 sft:
-  epochs: 1
-  lr: 2.0e-4
-  batch_size: 4
-  grad_accum: 4
-  warmup_ratio: 0.03
-  weight_decay: 0.0
-  lr_scheduler_type: "cosine"
+  epochs: 1                        # epochs
+  lr: 2.0e-4                       # learning_rate
+  batch_size: 8                    # batch_size
+  grad_accum: 2                    # gradient_accumulation_steps
+  warmup_ratio: 0.03               # lr_warmup_ratio (lr_warmup_steps: 0)
+  weight_decay: 0.0                # weight_decay
+  lr_scheduler_type: "cosine"      # lr_scheduler_type
+  max_grad_norm: 1.0               # max_grad_norm
+  optim: "adamw_torch"             # optimizer: adamw
+  gradient_checkpointing: true     # disable_gradient_checkpointing: false (+ unsloth_gradient_checkpointing)
+  use_liger_kernel: true           # liger_kernel: true  (needs: uv pip install liger-kernel)
   max_seq_len: 4096
   train_on_responses_only: true
   multiturn_masking: true
   packing: false
-  save_steps: 200
-  eval_steps: 200
-  logging_steps: 10
-  save_total_limit: 3
-  load_best_model_at_end: true
+  val_split: 0.05                  # giữ 5% record làm eval HELD-OUT thật (đo eval_loss ngoài mẫu)
+  save_steps: 100                  # checkpoint_steps (checkpoint_strategy: steps)
+  eval_steps: 100                  # eval_steps (eval_strategy: steps)
+  logging_steps: 10                # logging_steps
+  save_total_limit: 3              # number_of_checkpoints
+  load_best_model_at_end: true     # lưu best checkpoint theo eval_rubric_avg
   metric_for_best_model: "rubric_avg"
   greater_is_better: true
   early_stopping_patience: 3
@@ -48,4 +55,4 @@ eval_during_training:
   gold_subset: "data/gold/gold_test.jsonl"
   subset_size: 32
   max_new_tokens: 512
-  use_judge: false                # reduced rubric only during training (fast)
+  use_judge: false                 # reduced rubric only during training (fast)

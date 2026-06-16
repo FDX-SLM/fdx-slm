@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 
 from slm_coach.data.loader import load_records
 from slm_coach.data.mixture import build_curriculum
-from slm_coach.training.sft import load_gold_subset, run_sft_core
+from slm_coach.training.sft import load_gold_subset, run_sft_core, split_holdout
 from slm_coach.utils.logging import get_logger
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -45,14 +45,27 @@ def run_multistage_training(
     """
     output_dir = Path(config.output_dir) / config.run_name
     data = load_records(config.data.dir, ("sft", "reasoning"), config.data.keep_audit_status)
-    records_by_type = {"sft": data["sft"], "reasoning": data["reasoning"]}
+
+    # Hold out a TRUE validation set ONCE (per data type) and exclude it from EVERY stage, so the
+    # out-of-sample eval_loss is never leaked by a later stage re-including the same records.
+    val_records: list = []
+    records_by_type: dict = {}
+    for data_type in ("sft", "reasoning"):
+        kept, held = split_holdout(list(data[data_type]), config.sft.val_split, config.seed)
+        records_by_type[data_type] = kept
+        val_records.extend(held)
+
     specs = [s.model_dump() for s in config.stages] or _default_specs()
     stages = build_curriculum(specs, records_by_type, seed=config.seed)
     gold_records = load_gold_subset(config)
 
     logger.info(
         "Multi-stage plan",
-        extra={"run_name": config.run_name, "stages": [(s.name, len(s)) for s in stages]},
+        extra={
+            "run_name": config.run_name,
+            "stages": [(s.name, len(s)) for s in stages],
+            "n_val_holdout": len(val_records),
+        },
     )
     if dry_run:
         logger.info(
@@ -76,6 +89,7 @@ def run_multistage_training(
             reasoning_thinking=stage.reasoning_thinking,
             resume=resume if index == 0 else None,
             stage_name=stage.name,
+            val_records=val_records,
         )
         existing_adapter = str(stage_best)  # next stage continues this adapter
         final_best = stage_best

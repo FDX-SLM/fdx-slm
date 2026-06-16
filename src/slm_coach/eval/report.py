@@ -95,6 +95,26 @@ def _build_markdown(
     if agreement is not None:
         lines += ["## Judge agreement", "", f"- Mean disagreement (max-min): {agreement:.3f}", ""]
 
+    usage = extras.get("judge_usage")
+    if usage:
+        lines += [
+            "## Judge API usage & cost (estimate)",
+            "",
+            f"- Calls: {usage.get('calls', 0)} | tokens: {usage.get('total_tokens', 0):,} "
+            f"(in {usage.get('prompt_tokens', 0):,} / out {usage.get('completion_tokens', 0):,}) "
+            f"| **est. cost: ${usage.get('est_usd', 0):.4f}**",
+            "",
+            "| Judge | Model | Calls | In tok | Out tok | Est. $ |",
+            "| --- | --- | ---: | ---: | ---: | ---: |",
+        ]
+        for name, info in usage.get("by_judge", {}).items():
+            lines.append(
+                f"| {name} | {info.get('model', '?')} | {info.get('calls', 0)} "
+                f"| {info.get('prompt_tokens', 0):,} | {info.get('completion_tokens', 0):,} "
+                f"| {info.get('est_usd', 0):.4f} |"
+            )
+        lines.append("")
+
     return "\n".join(lines)
 
 

@@ -29,6 +29,15 @@ generation:
 # Also compare each answer against the gold reference (pairwise A/B win-rate).
 pairwise: true
 
+# Production coach system prompt — injected into EVERY gold prompt so eval matches deployed
+# behavior (applied uniformly to the model under test AND any baseline/parent for fairness).
+# Replace with the exact prompt you ship to production.
+system_prompt: |
+  Bạn là tư vấn viên bán iPhone chuyên nghiệp tại FPT Shop. Luôn trả lời bằng tiếng Việt, lịch sự,
+  thân thiện; xưng "em", gọi khách "anh/chị". Tư vấn trung thực theo đúng nhu cầu khách, không bịa
+  thông số hay giá, không thúc ép mua. Đồng cảm trước khi xử lý phản đối và luôn đề xuất một bước
+  tiếp theo rõ ràng (so sánh, trả góp, thu cũ, giữ máy...).
+
 # Optional offline generation latency (p50/p95 of model.generate), NOT a serving benchmark.
 latency:
   measure: true

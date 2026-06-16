@@ -132,8 +132,11 @@ class OpenAIJudge:
     name = "gpt"
 
     def __init__(self, model: str = "gpt-4o") -> None:
-        """Store the OpenAI model id."""
+        """Store the OpenAI model id and zero the usage counters."""
         self.model = model
+        self.n_calls = 0
+        self.prompt_tokens = 0
+        self.completion_tokens = 0
 
     def _client(self) -> Any:
         """Build an OpenAI client (key from ``OPENAI_API_KEY``)."""
@@ -141,13 +144,18 @@ class OpenAIJudge:
 
     @retry(stop=stop_after_attempt(4), wait=wait_exponential(min=1, max=20), reraise=True)
     def _chat(self, content: str) -> str:
-        """Send a single JSON-mode chat request and return the raw text."""
+        """Send a single JSON-mode chat request and return the raw text (records token usage)."""
         response = self._client().chat.completions.create(
             model=self.model,
             messages=[{"role": "user", "content": content}],
             temperature=0,
             response_format={"type": "json_object"},
         )
+        self.n_calls += 1
+        usage = getattr(response, "usage", None)
+        if usage is not None:
+            self.prompt_tokens += int(getattr(usage, "prompt_tokens", 0) or 0)
+            self.completion_tokens += int(getattr(usage, "completion_tokens", 0) or 0)
         return response.choices[0].message.content or ""
 
     def score(self, *, prompt: str, answer: str, criteria: Sequence[str]) -> RubricScore:
@@ -165,15 +173,23 @@ class GeminiJudge:
     name = "gemini"
 
     def __init__(self, model: str = "gemini-1.5-pro") -> None:
-        """Store the Gemini model id."""
+        """Store the Gemini model id and zero the usage counters."""
         self.model = model
+        self.n_calls = 0
+        self.prompt_tokens = 0
+        self.completion_tokens = 0
 
     @retry(stop=stop_after_attempt(4), wait=wait_exponential(min=1, max=20), reraise=True)
     def _generate(self, content: str) -> str:
-        """Send a single request to Google GenAI and return the raw text."""
+        """Send a single request to Google GenAI and return the raw text (records token usage)."""
         genai = require("google.genai", "eval")
         client = genai.Client(api_key=os.environ.get("GOOGLE_API_KEY"))
         response = client.models.generate_content(model=self.model, contents=content)
+        self.n_calls += 1
+        usage = getattr(response, "usage_metadata", None)
+        if usage is not None:
+            self.prompt_tokens += int(getattr(usage, "prompt_token_count", 0) or 0)
+            self.completion_tokens += int(getattr(usage, "candidates_token_count", 0) or 0)
         return getattr(response, "text", "") or ""
 
     def score(self, *, prompt: str, answer: str, criteria: Sequence[str]) -> RubricScore:
@@ -197,6 +213,13 @@ class MockJudge:
     name = "mock"
 
     _POLITE_MARKERS = ("dạ", "ạ", "anh", "chị", "cảm ơn")
+
+    def __init__(self) -> None:
+        """Initialize zero usage counters (the mock makes no API calls)."""
+        self.model = "mock"
+        self.n_calls = 0
+        self.prompt_tokens = 0
+        self.completion_tokens = 0
 
     def _heuristic(self, answer: str) -> float:
         """A length + politeness heuristic mapped onto the 1-5 scale."""
@@ -250,3 +273,61 @@ def build_judges(judge_names: Sequence[str], judge_models: dict[str, str]) -> li
         else:
             raise ValueError(f"unknown judge '{name}'; supported: gpt, gemini, mock")
     return judges
+
+
+#: Approximate provider prices in USD per 1M tokens, ``model -> (input, output)``. These move
+#: over time — treat the resulting cost as an estimate and update as your contract changes.
+JUDGE_PRICE_PER_1M: dict[str, tuple[float, float]] = {
+    "gpt-4o-mini": (0.15, 0.60),
+    "gpt-4o": (2.50, 10.00),
+    "gemini-1.5-flash": (0.075, 0.30),
+    "gemini-1.5-pro": (1.25, 5.00),
+}
+
+
+def _estimate_usd(model: str, prompt_tokens: int, completion_tokens: int) -> float:
+    """Estimate USD cost for one judge's token usage (0 if the model isn't priced)."""
+    for key, (price_in, price_out) in JUDGE_PRICE_PER_1M.items():
+        if key in model:
+            return prompt_tokens / 1e6 * price_in + completion_tokens / 1e6 * price_out
+    return 0.0
+
+
+def judge_usage(judges: Sequence[Judge]) -> dict[str, Any]:
+    """Aggregate API calls + token usage (and an approximate USD cost) across judges.
+
+    Args:
+        judges: The judge backends used in a run (after they have been called).
+
+    Returns:
+        A dict with totals (``calls``, ``prompt_tokens``, ``completion_tokens``, ``total_tokens``,
+        ``est_usd``) plus a ``by_judge`` per-judge breakdown.
+    """
+    by_judge: dict[str, Any] = {}
+    total_calls = total_in = total_out = 0
+    total_usd = 0.0
+    for judge in judges:
+        calls = int(getattr(judge, "n_calls", 0))
+        in_tok = int(getattr(judge, "prompt_tokens", 0))
+        out_tok = int(getattr(judge, "completion_tokens", 0))
+        model = str(getattr(judge, "model", judge.name))
+        usd = _estimate_usd(model, in_tok, out_tok)
+        by_judge[judge.name] = {
+            "model": model,
+            "calls": calls,
+            "prompt_tokens": in_tok,
+            "completion_tokens": out_tok,
+            "est_usd": round(usd, 4),
+        }
+        total_calls += calls
+        total_in += in_tok
+        total_out += out_tok
+        total_usd += usd
+    return {
+        "calls": total_calls,
+        "prompt_tokens": total_in,
+        "completion_tokens": total_out,
+        "total_tokens": total_in + total_out,
+        "est_usd": round(total_usd, 4),
+        "by_judge": by_judge,
+    }

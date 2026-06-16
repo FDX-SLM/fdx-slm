@@ -33,6 +33,9 @@ def main(
     mock: bool = typer.Option(
         False, "--mock", help="Offline mock run: canned generation + mock judge (no GPU/API)."
     ),
+    run_name: str = typer.Option(
+        None, "--run-name", help="Report dir name (outputs/eval/<run-name>/); default timestamp."
+    ),
     json_logs: bool = typer.Option(False, "--json-logs", help="Emit JSON-structured logs."),
 ) -> None:
     """Run the full evaluation pipeline."""
@@ -50,7 +53,7 @@ def main(
             f"[green]Dry run OK — would evaluate {model} with judges {cfg.judges}.[/green]"
         )
         raise typer.Exit()
-    report_dir = run_evaluation(cfg, model, mock=mock)
+    report_dir = run_evaluation(cfg, model, mock=mock, run_name=run_name)
     console.print(f"[green]Report written to {report_dir}[/green]")
 
 

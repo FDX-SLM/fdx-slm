@@ -1,48 +1,58 @@
-# T3 — DPO alignment (2-pass). Use when < 800 preference pairs.
+# T3 — DPO alignment. Hyperparameters mapped from the FPT/LLaMA-Factory job config.
 # DPO REQUIRES an SFT checkpoint as its starting point (pass --sft-checkpoint or set below).
 # See docs/SPEC.md §1, §9 and .claude/rules/training.md.
 defaults: base.yaml
 
 run_name: "align_dpo"
+seed: 1308                         # seed
 
 lora:
-  r: 16
-  alpha: 32
-  dropout: 0.05
+  r: 32                            # lora_rank
+  alpha: 64                        # lora_alpha
+  dropout: 0.05                    # lora_dropout
   target_modules: "all-linear"
   bias: "none"
 
 quant:
-  load_in_4bit: true
+  load_in_4bit: false              # quantization_bit: none
 
 model:
-  max_seq_len: 4096
-  attn_implementation: "flash_attention_2"
+  max_seq_len: 4096                # max_sequence_length
+  attn_implementation: "sdpa"   # default; đổi sang flash_attention_2 nếu đã cài flash-attn
   use_unsloth: true
-  dtype: "bfloat16"
+  dtype: "bfloat16"                # mixed_precision: bf16
 
 align:
-  method: "dpo"                   # < 800 pairs -> DPO
-  beta: 0.1
-  lr: 5.0e-6
-  epochs: 1
-  max_length: 2048
-  max_prompt_length: 1024
+  method: "dpo"                    # fully DPO (pref_loss: sigmoid)
+  beta: 0.1                        # pref_beta
+  lr: 2.0e-4                       # learning_rate  (!! cao cho DPO — xem ghi chú; thường 5.0e-6)
+  epochs: 1                        # epochs
+  max_length: 4096                 # max_sequence_length
+  max_prompt_length: 2048          # JSON chỉ có 1 max -> đặt prompt = nửa total
+  loss_type: "sigmoid"             # pref_loss
+  label_smoothing: 0.0             # dpo_label_smoothing
+  rpo_alpha: null                  # pref_ftx: 0 -> tắt (thêm số hạng SFT vào DPO khi > 0)
 
-batch_size: 2
-grad_accum: 8
+batch_size: 8                      # batch_size
+grad_accum: 2                      # gradient_accumulation_steps
 
 train:
-  save_steps: 100
-  eval_steps: 100
-  logging_steps: 10
-  save_total_limit: 3
-  load_best_model_at_end: true
+  save_steps: 100                  # checkpoint_steps
+  eval_steps: 100                  # eval_steps
+  logging_steps: 10                # logging_steps
+  save_total_limit: 3              # number_of_checkpoints
+  load_best_model_at_end: true     # lưu best checkpoint theo eval_loss (tách eval split tự động)
   metric_for_best_model: "rubric_avg"
   greater_is_better: true
   early_stopping_patience: 3
-  warmup_ratio: 0.03
-  max_seq_len: 2048
+  warmup_ratio: 0.03               # lr_warmup_ratio
+  weight_decay: 0.0                # weight_decay
+  lr_scheduler_type: "cosine"      # lr_scheduler_type
+  max_grad_norm: 1.0               # max_grad_norm
+  optim: "adamw_torch"             # optimizer: adamw
+  gradient_checkpointing: true     # disable_gradient_checkpointing: false
+  use_liger_kernel: true           # liger_kernel: true  (needs: uv pip install liger-kernel)
+  max_seq_len: 4096
 
 # Starting point for DPO. Override on the CLI with --sft-checkpoint.
-sft_checkpoint: "checkpoints/sft_multistage/best"
+sft_checkpoint: "checkpoints/sft_lora/best"

@@ -148,3 +148,56 @@ def test_plot_functions_degrade_without_raising(tmp_path):
     rows = merge_log_history(_LOG_HISTORY)
     assert isinstance(plot_training_curves(rows, tmp_path), list)
     assert isinstance(plot_eval(_breakdown(), tmp_path), list)
+
+
+# --- Baseline comparison leaderboard --------------------------------------------------------
+
+
+def _write_report_json(tmp_path, run, *, model, overall_10, modes, win=None):
+    d = tmp_path / run
+    d.mkdir(parents=True, exist_ok=True)
+    extras = {"model": model}
+    if win is not None:
+        extras["pairwise_vs_reference"] = {"win": win, "tie": 0.0, "loss": 1 - win, "n": 2}
+    payload = {
+        "overall": {"n": 2, "weighted_avg_10": overall_10},
+        "per_mode": {m: {"weighted_avg_10": s} for m, s in modes.items()},
+        "extras": extras,
+    }
+    (d / "report.json").write_text(json.dumps(payload), encoding="utf-8")
+    return d / "report.json"
+
+
+def test_compare_leaderboard_ranks_and_tabulates(tmp_path):
+    from slm_coach.reporting.compare import build_leaderboard, find_reports, load_reports
+
+    _write_report_json(
+        tmp_path,
+        "bl_qlora_multi",
+        model="ckpt/best",
+        overall_10=8.1,
+        modes={"comparison": 8.0, "objection_handling": 8.2},
+        win=0.75,
+    )
+    _write_report_json(
+        tmp_path,
+        "base_qwen",
+        model="Qwen/Qwen3-8B",
+        overall_10=5.4,
+        modes={"comparison": 6.0, "objection_handling": 4.8},
+    )
+    reports = load_reports(find_reports(tmp_path))
+    assert set(reports) == {"bl_qlora_multi", "base_qwen"}
+
+    md = build_leaderboard(reports)
+    # Higher overall ranks first.
+    assert md.index("bl_qlora_multi") < md.index("base_qwen")
+    assert "Qwen/Qwen3-8B" in md
+    assert "75%" in md  # pairwise win-rate
+    assert "objection_handling" in md  # per-mode matrix column
+
+
+def test_compare_leaderboard_empty():
+    from slm_coach.reporting.compare import build_leaderboard
+
+    assert "No reports found" in build_leaderboard({})

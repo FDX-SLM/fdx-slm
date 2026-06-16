@@ -1,8 +1,9 @@
-# T2 — multi-stage QLoRA SFT (the real SFT). Curriculum: broad sft -> + reasoning.
-# See docs/SPEC.md §1, §7, §9.
-defaults: base.yaml
+# Baseline corner: LoRA (16-bit) + single-stage SFT.  Run with scripts/train_sft.py
+# Identical hyperparameters to the other baseline corners — ONLY quant + stages differ.
+defaults: ../base.yaml
 
-run_name: "sft_multistage"
+run_name: "bl_lora_single"
+seed: 1308
 
 lora:
   r: 32
@@ -12,7 +13,7 @@ lora:
   bias: "none"
 
 quant:
-  load_in_4bit: true              # QLoRA (4-bit) for T2
+  load_in_4bit: false              # <-- LoRA (16-bit)
 
 model:
   max_seq_len: 4096
@@ -21,20 +22,23 @@ model:
   dtype: "bfloat16"
 
 sft:
-  epochs: 3
+  epochs: 1
   lr: 2.0e-4
-  batch_size: 4
-  grad_accum: 4
+  batch_size: 8
+  grad_accum: 2
   warmup_ratio: 0.03
   weight_decay: 0.0
   lr_scheduler_type: "cosine"
+  max_grad_norm: 1.0
+  optim: "adamw_torch"
+  gradient_checkpointing: true
+  use_liger_kernel: true
   max_seq_len: 4096
   train_on_responses_only: true
   multiturn_masking: true
   packing: false
-  val_split: 0.05                 # held-out toàn cục, loại khỏi MỌI stage (chống leak xuyên stage)
-  save_steps: 200
-  eval_steps: 200
+  save_steps: 100
+  eval_steps: 100
   logging_steps: 10
   save_total_limit: 3
   load_best_model_at_end: true
@@ -44,16 +48,6 @@ sft:
   mixture:
     multi_turn: 0.66
     single: 0.34
-
-# Curriculum stages run sequentially; each starts from the previous stage's checkpoint.
-stages:
-  - name: "broad"
-    include: ["sft"]
-    mix: { multi_turn: 0.66, single: 0.34 }
-    reasoning_thinking: false
-  - name: "reasoning"
-    include: ["sft", "reasoning"]
-    reasoning_thinking: true
 
 eval_during_training:
   enabled: true
