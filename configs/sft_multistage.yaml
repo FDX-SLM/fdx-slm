@@ -32,6 +32,7 @@ sft:
   train_on_responses_only: true
   multiturn_masking: true
   packing: false
+  val_split: 0.05                 # held-out toàn cục, loại khỏi MỌI stage (chống leak xuyên stage)
   save_steps: 200
   eval_steps: 200
   logging_steps: 10

@@ -23,6 +23,7 @@ from slm_coach.training.callbacks import (
     proxy_rubric_score,
     write_meta_json,
 )
+from slm_coach.training.sft import split_holdout
 
 # --- Phase 2: checkpoint meta + eval-during-training callback ---------------------------------
 
@@ -76,6 +77,32 @@ def test_eval_during_training_with_judges():
     metrics: dict[str, float] = {}
     callback.on_evaluate(None, SimpleNamespace(global_step=5), "CONTROL", metrics=metrics)
     assert 1.0 <= metrics["eval_rubric_avg"] <= 5.0
+
+
+# --- True held-out validation split (no leak) ------------------------------------------------
+
+
+def test_split_holdout_no_leak_and_deterministic():
+    records = list(range(100))
+    train, val = split_holdout(records, 0.1, seed=1308)
+    assert len(train) == 90 and len(val) == 10
+    assert set(train).isdisjoint(set(val))  # held-out is never in train (no leak)
+    assert set(train) | set(val) == set(records)  # partition, nothing dropped
+    # Deterministic for the same seed; different seed reshuffles which rows are held out.
+    assert split_holdout(records, 0.1, seed=1308)[1] == val
+    assert split_holdout(records, 0.1, seed=7)[1] != val
+
+
+def test_split_holdout_disabled_returns_all_train():
+    records = list(range(20))
+    train, val = split_holdout(records, 0.0, seed=1)
+    assert train == records and val == []
+
+
+def test_split_holdout_tiny_dataset_falls_back():
+    # 10 records * 0.05 = 0.5 -> rounds to 0 val -> fallback to no split (smoke-safe).
+    train, val = split_holdout(list(range(10)), 0.05, seed=1)
+    assert len(train) == 10 and val == []
 
 
 # --- Phase 3: rubric, judges, pairwise, latency, harness, report ------------------------------

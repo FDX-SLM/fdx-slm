@@ -137,6 +137,9 @@ class SFTParams(TrainControlConfig):
     train_on_responses_only: bool = True
     multiturn_masking: bool = True
     packing: bool = False
+    # Fraction of training records held out as a TRUE out-of-sample eval set (never trained on),
+    # so eval_loss is meaningful and overfit is visible. 0.0 keeps the legacy in-sample behavior.
+    val_split: float = 0.0
     mixture: MixtureConfig = Field(default_factory=MixtureConfig)
 
 

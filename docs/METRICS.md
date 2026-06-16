@@ -91,10 +91,19 @@ Mỗi dòng = một step có log. Các cột chính:
 | `step` | Số step đã train | trục thời gian |
 | `epoch` | Đã đi qua bao nhiêu epoch | tiến độ |
 | `loss` | **Train loss** — model khớp data train cỡ nào | phải **giảm dần** |
-| `eval_loss` | Loss trên tập eval giữ lại | giảm rồi chững; nếu **tăng lại** = overfit |
+| `eval_loss` | Loss trên tập eval | xem ô cảnh báo bên dưới (ý nghĩa phụ thuộc `val_split`) |
 | `learning_rate` | LR hiện tại (cosine giảm dần) | kiểm tra scheduler đúng |
 | `grad_norm` | Độ lớn gradient | nhảy vọt = bất ổn (NaN/explode) |
-| `eval_rubric_avg` | Điểm rubric rút gọn (nếu eval-during-training bật) | nên **tăng dần** |
+| `eval_rubric_avg` | Điểm rubric trên **gold** (held-out, callback) — đây là metric chọn best | nên **tăng dần** |
+
+> ⚠️ **`eval_loss` có nghĩa hay không phụ thuộc `sft.val_split`:**
+> - `val_split: 0.0` (mặc định cũ) → `eval_dataset` lấy ngay vài dòng **trong tập train** (in-sample,
+>   bị *data leak*) → `eval_loss` **không** phản ánh tổng quát hóa, **không** dùng để bắt overfit. Nó
+>   chỉ là "ngòi nổ" để chu kỳ eval chạy → callback chấm `eval_rubric_avg` trên gold.
+> - `val_split: 0.05` (đã bật ở `sft_lora.yaml` + `sft_multistage.yaml`) → code **giữ lại 5% record
+>   làm held-out THẬT** (model chưa từng train, multi-stage loại khỏi *mọi* stage) → lúc này `eval_loss`
+>   là **ngoài mẫu**, đáng tin: **train loss giảm mà `eval_loss` tăng lại = overfit**.
+> Dù `val_split` bao nhiêu, **best checkpoint luôn chọn theo `eval_rubric_avg` trên gold**, không theo `eval_loss`.
 
 ### Biểu đồ (cần `--extra viz`)
 - **`loss_curve.png`** — đường `loss` (và `eval_loss` nếu có) theo step. **Kỳ vọng: dốc xuống rồi phẳng.**
@@ -181,7 +190,7 @@ Biểu đồ cần `--extra viz` (matplotlib). Không có viz thì CSV vẫn ghi
 | Câu hỏi | Mở file | Nhìn |
 | --- | --- | --- |
 | Train có học không? | `metrics/loss_curve.png` | loss **dốc xuống rồi phẳng** |
-| Có overfit không? | `training_log.csv` | `eval_loss` **tăng lại** trong khi `loss` vẫn giảm |
+| Có overfit không? | `training_log.csv` | (cần `val_split>0`) `eval_loss` **tăng lại** khi `loss` vẫn giảm; hoặc `eval_rubric_avg` (gold) chững/tụt |
 | Model giỏi cỡ nào? | `outputs/eval/<run>/report.md` | dòng `overall` **score_10** |
 | Yếu ở mode nào? | `per_mode.csv` | mode có `score_10` thấp nhất |
 | Yếu ở khía cạnh nào? | `criteria.csv` | tiêu chí có `mean_5` thấp nhất |
