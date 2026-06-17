@@ -1,0 +1,5 @@
+# Tắt file-watcher: nó quét submodule của torch/transformers (zoedepth → torchvision,
+# torch.classes...) và gây crash import. App demo không cần hot-reload.
+[server]
+fileWatcherType = "none"
+headless = true

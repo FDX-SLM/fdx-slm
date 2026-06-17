@@ -183,7 +183,7 @@ def to_sft_dataset(
 
 
 def preference_to_example(record: PreferenceRecord) -> dict[str, Any]:
-    """Convert one preference record into a TRL DPO/ORPO example.
+    """Convert one preference record into a TRL DPO example.
 
     Args:
         record: A preference canonical record.

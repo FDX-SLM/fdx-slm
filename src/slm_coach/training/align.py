@@ -1,9 +1,8 @@
-"""Alignment (T3): DPO or ORPO via TRL, selected by config.
+"""Alignment (T3): DPO via TRL.
 
-ORPO is monolithic (trains a fresh adapter on the base in a single stage). DPO continues the
-SFT adapter and requires an SFT checkpoint as its starting point. The method is chosen from
-``config.align.method`` — never hardcoded. Heavy deps are imported lazily; ``dry_run`` loads
-the preference data and logs the plan without a GPU.
+DPO continues the SFT adapter and requires an SFT checkpoint as its starting point. The method
+is config-driven (``config.align.method``) — never hardcoded. Heavy deps are imported lazily;
+``dry_run`` loads the preference data and logs the plan without a GPU.
 """
 
 from __future__ import annotations
@@ -43,15 +42,6 @@ def _valid_kwargs(config_cls: type, kwargs: dict[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in kwargs.items() if k in valid}
 
 
-def _resolve_orpo(trl: Any) -> tuple[type, type]:
-    """Return ``(ORPOConfig, ORPOTrainer)`` (moved to ``trl.experimental.orpo`` in newer TRL)."""
-    if hasattr(trl, "ORPOConfig") and hasattr(trl, "ORPOTrainer"):
-        return trl.ORPOConfig, trl.ORPOTrainer
-    from trl.experimental.orpo import ORPOConfig, ORPOTrainer
-
-    return ORPOConfig, ORPOTrainer
-
-
 def run_alignment(
     config: AlignFileConfig,
     *,
@@ -59,12 +49,12 @@ def run_alignment(
     resume: str | Path | None = None,
     dry_run: bool = False,
 ) -> Path:
-    """Run DPO or ORPO alignment and return the best checkpoint path.
+    """Run DPO alignment and return the best checkpoint path.
 
     Args:
-        config: Validated alignment config (``align.method`` selects DPO vs ORPO).
-        sft_checkpoint: SFT starting point — required for DPO, ignored for ORPO. Overrides
-            ``config.sft_checkpoint`` when provided.
+        config: Validated alignment config.
+        sft_checkpoint: SFT starting point — required for DPO. Overrides ``config.sft_checkpoint``
+            when provided.
         resume: Optional checkpoint to resume from.
         dry_run: If True, load preference data and log the plan without launching training.
 
@@ -72,11 +62,10 @@ def run_alignment(
         Path to the best aligned checkpoint directory.
 
     Raises:
-        ValueError: If DPO is selected without an SFT checkpoint.
+        ValueError: If no SFT checkpoint is provided.
     """
-    method = config.align.method
     start = sft_checkpoint or config.sft_checkpoint
-    if method == "dpo" and not start:
+    if not start:
         raise ValueError("DPO requires an SFT checkpoint as its starting point (--sft-checkpoint).")
 
     output_dir = Path(config.output_dir) / config.run_name
@@ -85,7 +74,7 @@ def run_alignment(
 
     logger.info(
         "Alignment plan",
-        extra={"method": method, "n_pref": len(preferences), "start": str(start)},
+        extra={"method": config.align.method, "n_pref": len(preferences), "start": str(start)},
     )
     if dry_run:
         logger.info(
@@ -94,7 +83,7 @@ def run_alignment(
         return output_dir / "best"
 
     dataset = to_preference_dataset(preferences)
-    return _run_align_core(config, dataset, output_dir, method=method, start=start, resume=resume)
+    return _run_align_core(config, dataset, output_dir, start=start, resume=resume)
 
 
 def _run_align_core(
@@ -102,23 +91,21 @@ def _run_align_core(
     dataset: Any,
     output_dir: Path,
     *,
-    method: str,
     start: str | Path | None,
     resume: str | Path | None,
 ) -> Path:
-    """Build and run the DPO/ORPO trainer, then save best + last + ``meta.json``."""
+    """Build and run the DPO trainer, then save best + last + ``meta.json``."""
     require("torch", "train")
     trl = require("trl", "train")
     from transformers import EarlyStoppingCallback
 
-    # ORPO trains a fresh adapter on the base; DPO continues the SFT adapter.
-    existing_adapter = str(start) if method == "dpo" else None
+    # DPO continues the SFT adapter.
     loaded = prepare_peft_model(
         config.model_name,
         config.model,
         config.quant,
         config.lora,
-        existing_adapter=existing_adapter,
+        existing_adapter=str(start),
     )
     tracker = init_tracking(config, run_name=config.run_name)
 
@@ -170,33 +157,22 @@ def _run_align_core(
                 "greater_is_better": False,
             }
         )
-    if method == "orpo":
-        orpo_config_cls, orpo_trainer_cls = _resolve_orpo(trl)
-        args = orpo_config_cls(**_valid_kwargs(orpo_config_cls, common))
-        trainer = orpo_trainer_cls(
-            model=loaded.model,
-            args=args,
-            train_dataset=dataset,
-            eval_dataset=eval_dataset,
-            processing_class=loaded.tokenizer,
-        )
-    else:
-        # DPO-specific loss controls (not part of ORPO's fixed loss).
-        dpo_kwargs = {
-            "loss_type": config.align.loss_type,
-            "label_smoothing": config.align.label_smoothing,
-        }
-        if config.align.rpo_alpha is not None:
-            dpo_kwargs["rpo_alpha"] = config.align.rpo_alpha
-        args = trl.DPOConfig(**_valid_kwargs(trl.DPOConfig, {**common, **dpo_kwargs}))
-        trainer = trl.DPOTrainer(
-            model=loaded.model,
-            ref_model=None,  # PEFT: reference is the adapter-disabled base
-            args=args,
-            train_dataset=dataset,
-            eval_dataset=eval_dataset,
-            processing_class=loaded.tokenizer,
-        )
+    # DPO-specific loss controls.
+    dpo_kwargs = {
+        "loss_type": config.align.loss_type,
+        "label_smoothing": config.align.label_smoothing,
+    }
+    if config.align.rpo_alpha is not None:
+        dpo_kwargs["rpo_alpha"] = config.align.rpo_alpha
+    args = trl.DPOConfig(**_valid_kwargs(trl.DPOConfig, {**common, **dpo_kwargs}))
+    trainer = trl.DPOTrainer(
+        model=loaded.model,
+        ref_model=None,  # PEFT: reference is the adapter-disabled base
+        args=args,
+        train_dataset=dataset,
+        eval_dataset=eval_dataset,
+        processing_class=loaded.tokenizer,
+    )
     trainer.add_callback(
         EarlyStoppingCallback(early_stopping_patience=config.train.early_stopping_patience)
     )
@@ -223,5 +199,5 @@ def _run_align_core(
         except Exception as exc:  # noqa: BLE001 - artifacts must never fail a good run
             logger.warning("Could not export training metrics", extra={"error": str(exc)})
     tracker.close()
-    logger.info("Alignment complete", extra={"method": method, "best": str(best_dir)})
+    logger.info("Alignment complete", extra={"method": config.align.method, "best": str(best_dir)})
     return best_dir

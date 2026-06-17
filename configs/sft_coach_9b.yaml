@@ -1,0 +1,63 @@
+# SFT QLoRA cho Qwen3.5-9B (10B params) trên 1x RTX 5090 32GB (Blackwell sm_120).
+# Chạy TRÊN SERVER: uv run python scripts/train_sft.py --config configs/sft_coach_9b.yaml
+# Xem docs/RUNBOOK.md (train) + docs/METRICS.md (đọc số liệu).
+defaults: base.yaml
+
+run_name: "sft_coach_9b"
+seed: 1308
+
+# Base THẬT 10B. Tag "image-text-to-text" → nếu load lỗi, cần transformers mới hơn.
+model_name: "Qwen/Qwen3.5-9B"
+
+lora:
+  r: 32
+  alpha: 64
+  dropout: 0.05
+  target_modules: "all-linear"
+  bias: "none"
+
+quant:
+  load_in_4bit: true              # QLoRA — 10B vừa thoải mái trong 32GB (bf16 sẽ sát trần)
+
+model:
+  max_seq_len: 2048               # câu coach ngắn; 2048 dư dùng
+  attn_implementation: "sdpa"     # SDPA built-in; KHÔNG dùng flash-attn (kén Blackwell)
+  use_unsloth: false              # Linux có Triton nhưng Unsloth kén sm_120 → tắt cho chắc
+  dtype: "bfloat16"
+
+sft:
+  epochs: 3                       # data ~360 dòng train + model to → 3 epoch đủ, tránh overfit
+  lr: 2.0e-4
+  batch_size: 1                   # 32GB + 10B → batch 1
+  eval_batch_size: 1              # PHẢI để 1: eval dựng fp32 logits [b×seq×vocab]; batch 8 (mặc định HF) → OOM
+  grad_accum: 16                  # batch hiệu dụng = 16 (ổn định hơn cho model to)
+  warmup_ratio: 0.03
+  weight_decay: 0.0
+  lr_scheduler_type: "cosine"
+  max_grad_norm: 1.0
+  optim: "adamw_torch"
+  gradient_checkpointing: true    # bắt buộc cho 10B/32GB
+  use_liger_kernel: false
+  max_seq_len: 2048
+  train_on_responses_only: true   # loss chỉ trên assistant turn (gồm khối <think>)
+  multiturn_masking: true
+  packing: false
+  val_split: 0.05                 # giữ 5% held-out THẬT để soi overfit
+  save_steps: 10
+  eval_steps: 10
+  logging_steps: 5
+  save_total_limit: 2
+  load_best_model_at_end: true
+  metric_for_best_model: "rubric_avg"
+  greater_is_better: true
+  early_stopping_patience: 3
+  mixture:
+    multi_turn: 0.3
+    single: 0.7
+
+eval_during_training:
+  enabled: true
+  gold_subset: "data/gold/gold_test.jsonl"
+  subset_size: 8
+  max_new_tokens: 256
+  use_judge: false                # rubric proxy nhanh khi train (không tốn API)

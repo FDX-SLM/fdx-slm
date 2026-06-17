@@ -1,8 +1,7 @@
 # Đọc metrics — train ra gì, eval ra gì, mỗi con số nghĩa là gì
 
 Tài liệu này giải thích **mọi file số liệu** pipeline sinh ra: ở đâu, cột nào nghĩa gì, nhìn vào đâu
-để biết model tốt/xấu. Bổ trợ cho [RUNBOOK.md](RUNBOOK.md) (chạy lệnh theo thứ tự) và
-[BASELINES.md](BASELINES.md) (so công thức).
+để biết model tốt/xấu. Bổ trợ cho [RUNBOOK.md](RUNBOOK.md) (chạy lệnh theo thứ tự).
 
 ---
 
@@ -12,9 +11,9 @@ Tài liệu này giải thích **mọi file số liệu** pipeline sinh ra: ở 
 
 | Lệnh bạn chạy | Ghi vào | Có gì |
 | --- | --- | --- |
-| `train_sft.py` / `train_multistage.py` / `train_align.py` | **`checkpoints/<run>/`** | adapter, `best/`, `last/`, `meta.json`, **`metrics/`** (loss/lr/rubric theo *step*) |
+| `train_sft.py` / `train_align.py` | **`checkpoints/<run>/`** | adapter, `best/`, `last/`, `meta.json`, **`metrics/`** (loss/lr/rubric theo *step*) |
 | `evaluate.py` | **`outputs/eval/<run>/`** | `report.md`, `report.json`, `per_mode.csv`, `criteria.csv`, `per_sample.csv` + PNG |
-| `compare_baselines.py` | `outputs/eval/comparison.{md,csv}` | bảng xếp hạng nhiều run |
+| `compare_baselines.py` | `outputs/eval/comparison.{md,csv}` | bảng xếp hạng nhiều run (vd SFT vs DPO) |
 | `compare_models.py` | `outputs/eval/headtohead.{md,csv}` | win-rate 1-1 SLM vs model mẹ |
 
 > ❗ **Chạy `train_sft.py` KHÔNG sinh ra `outputs/eval/...`.** Nó chỉ ghi `checkpoints/<run>/` (kèm
@@ -26,7 +25,7 @@ Tài liệu này giải thích **mọi file số liệu** pipeline sinh ra: ở 
 > cáo eval đầy đủ. Báo cáo đầy đủ luôn đến từ `evaluate.py`.
 
 ```
-checkpoints/sft_lora_smoke/        ← TRAIN ghi ở đây
+checkpoints/sft_coach_9b/          ← TRAIN ghi ở đây
 ├── best/  last/  checkpoint-*/
 └── metrics/
     ├── training_log.csv           (loss, eval_loss, lr, grad_norm, eval_rubric_avg theo step)
@@ -100,9 +99,9 @@ Mỗi dòng = một step có log. Các cột chính:
 > - `val_split: 0.0` (mặc định cũ) → `eval_dataset` lấy ngay vài dòng **trong tập train** (in-sample,
 >   bị *data leak*) → `eval_loss` **không** phản ánh tổng quát hóa, **không** dùng để bắt overfit. Nó
 >   chỉ là "ngòi nổ" để chu kỳ eval chạy → callback chấm `eval_rubric_avg` trên gold.
-> - `val_split: 0.05` (đã bật ở `sft_lora.yaml` + `sft_multistage.yaml`) → code **giữ lại 5% record
->   làm held-out THẬT** (model chưa từng train, multi-stage loại khỏi *mọi* stage) → lúc này `eval_loss`
->   là **ngoài mẫu**, đáng tin: **train loss giảm mà `eval_loss` tăng lại = overfit**.
+> - `val_split: 0.05` (đã bật ở `sft_coach_9b.yaml`) → code **giữ lại 5% record làm held-out THẬT**
+>   (model chưa từng train) → lúc này `eval_loss` là **ngoài mẫu**, đáng tin: **train loss giảm mà
+>   `eval_loss` tăng lại = overfit**.
 > Dù `val_split` bao nhiêu, **best checkpoint luôn chọn theo `eval_rubric_avg` trên gold**, không theo `eval_loss`.
 
 ### Biểu đồ (cần `--extra viz`)
@@ -154,11 +153,14 @@ Một dòng mỗi ca gold. Cột: `id, mode, score_5, score_10, <7 tiêu chí>, 
 
 ## 4. So nhiều run — `comparison.{md,csv}`
 
-`compare_baselines.py` gom mọi `outputs/eval/*/report.json` thành **một bảng xếp hạng**.
+`compare_baselines.py` gom mọi `outputs/eval/*/report.json` thành **một bảng xếp hạng** (vd so `eval_sft` vs `eval_dpo`).
 - **`comparison.md`** — bảng đẹp để đọc: rank, run, model, overall /10, pairwise win, ma trận per-mode.
 - **`comparison.csv`** — cùng dữ liệu, dạng phẳng để mở Excel sort/lọc. Cột:
   `rank, run, model, overall_10, pairwise_win_vs_gold, n, mode_<từng mode>`.
-→ Dùng để chọn công thức tốt nhất (LoRA vs QLoRA, single vs multi, SFT vs SFT+DPO).
+
+```bash
+uv run python scripts/compare_baselines.py      # gộp mọi outputs/eval/*/report.json
+```
 
 ---
 
@@ -168,7 +170,13 @@ Một dòng mỗi ca gold. Cột: `id, mode, score_5, score_10, <7 tiêu chí>, 
 - **`headtohead.md`** — bảng + dòng *Headline* "SLM thắng Qwen mẹ **X%**".
 - **`headtohead.csv`** — dạng phẳng. Cột: `slice, a_win_pct, tie_pct, b_win_pct, n`
   (`slice` = `overall` hoặc tên mode; `a` = model under test, `b` = baseline/mẹ).
-→ Con số trực quan nhất cho sếp. Lưu ý: 2 file `per_sample.csv` phải từ eval **thật** (không `--mock`).
+
+```bash
+uv run python scripts/compare_models.py \
+    --a outputs/eval/eval_dpo/per_sample.csv          --label-a "SLM (DPO)" \
+    --b outputs/eval/eval_base_qwen/per_sample.csv    --label-b "Qwen3.5-9B (mẹ)"
+```
+→ Lưu ý: 2 file `per_sample.csv` phải từ eval **thật** (không `--mock`).
 
 ---
 
@@ -177,7 +185,7 @@ Một dòng mỗi ca gold. Cột: `id, mode, score_5, score_10, <7 tiêu chí>, 
 Không cần train/eval lại — đọc lại file đã có:
 ```bash
 # từ một run train
-uv run python scripts/plot_metrics.py --run-dir checkpoints/align_dpo
+uv run python scripts/plot_metrics.py --run-dir checkpoints/align_coach_dpo
 # từ một report eval
 uv run python scripts/plot_metrics.py --report outputs/eval/eval_dpo/report.json
 ```

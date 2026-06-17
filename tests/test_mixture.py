@@ -1,9 +1,8 @@
-"""Tests for single/multi-turn mixing and curriculum staging."""
+"""Tests for single/multi-turn mixing."""
 
 from __future__ import annotations
 
 from slm_coach.data.mixture import (
-    build_curriculum,
     is_multi_turn,
     mix_single_multi,
     split_single_multi,
@@ -23,23 +22,6 @@ def _sft(rec_id: str, *, multi: bool) -> object:
             "mode": "comparison",
             "persona": "P01",
             "messages": messages,
-            "lang": "vi",
-            "version": "v1",
-            "audit_status": "approved",
-        }
-    )
-
-
-def _reasoning(rec_id: str) -> object:
-    return parse_record(
-        {
-            "id": rec_id,
-            "data_type": "reasoning",
-            "mode": "objection_handling",
-            "persona": "P02",
-            "situation": "S",
-            "reasoning": ["a"],
-            "response": "R",
             "lang": "vi",
             "version": "v1",
             "audit_status": "approved",
@@ -73,21 +55,3 @@ def test_mix_is_deterministic_with_seed():
     first = [r.id for r in mix_single_multi(records, multi_turn=0.66, single=0.34, seed=7)]
     second = [r.id for r in mix_single_multi(records, multi_turn=0.66, single=0.34, seed=7)]
     assert first == second
-
-
-def test_build_curriculum_orders_and_selects():
-    sft_records = [_sft(f"m{i}", multi=True) for i in range(4)]
-    sft_records += [_sft(f"s{i}", multi=False) for i in range(4)]
-    records_by_type = {"sft": sft_records, "reasoning": [_reasoning("r1"), _reasoning("r2")]}
-
-    specs = [
-        {"name": "broad", "include": ["sft"], "mix": {"multi_turn": 0.66, "single": 0.34}},
-        {"name": "reasoning", "include": ["sft", "reasoning"], "reasoning_thinking": True},
-    ]
-    stages = build_curriculum(specs, records_by_type, seed=3)
-
-    assert [s.name for s in stages] == ["broad", "reasoning"]
-    assert all(r.data_type == "sft" for r in stages[0].records)
-    assert stages[0].reasoning_thinking is False
-    assert stages[1].reasoning_thinking is True
-    assert any(r.data_type == "reasoning" for r in stages[1].records)

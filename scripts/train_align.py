@@ -1,7 +1,7 @@
-"""CLI: T3 alignment — ORPO or DPO, selected by config (docs/SPEC.md §11, Step 4).
+"""CLI: T3 alignment — DPO (docs/SPEC.md §11, Step 4).
 
 Thin entrypoint — delegates to :func:`slm_coach.training.align.run_alignment`. DPO requires an
-SFT checkpoint as its starting point (``--sft-checkpoint``); ORPO is monolithic.
+SFT checkpoint as its starting point (``--sft-checkpoint``).
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from slm_coach.utils.logging import configure_logging, get_logger
 from slm_coach.utils.runtime import bootstrap
 from slm_coach.utils.seed import set_seed
 
-app = typer.Typer(add_completion=False, help="Train T3: ORPO/DPO alignment.")
+app = typer.Typer(add_completion=False, help="Train T3: DPO alignment.")
 console = Console()
 logger = get_logger(__name__)
 
@@ -32,7 +32,7 @@ def main(
     dry_run: bool = typer.Option(False, "--dry-run", help="Resolve config + plan only (no GPU)."),
     json_logs: bool = typer.Option(False, "--json-logs", help="Emit JSON-structured logs."),
 ) -> None:
-    """Run DPO or ORPO alignment (method chosen by the config)."""
+    """Run DPO alignment."""
     bootstrap()
     configure_logging(json_logs=json_logs)
     cfg = load_align_config(config)
@@ -42,7 +42,7 @@ def main(
         "Starting alignment",
         extra={"run_name": cfg.run_name, "method": cfg.align.method, "sft_checkpoint": str(start)},
     )
-    if cfg.align.method == "dpo" and start is None:
+    if start is None:
         raise typer.BadParameter("DPO requires --sft-checkpoint (or sft_checkpoint in the config).")
     if dry_run:
         console.print_json(cfg.model_dump_json(indent=2))

@@ -17,61 +17,32 @@ from slm_coach.config import (
 CONFIGS = Path(__file__).resolve().parents[1] / "configs"
 
 
-def test_sft_lora_config_merges_base():
-    cfg = load_sft_config(CONFIGS / "sft_lora.yaml")
-    assert cfg.model_name == "Qwen/Qwen3.5-9B"  # from base.yaml
-    assert cfg.seed == 1308  # overridden in sft_lora.yaml (base default is 42)
+def test_sft_coach_9b_config_merges_base():
+    cfg = load_sft_config(CONFIGS / "sft_coach_9b.yaml")
+    assert cfg.model_name == "Qwen/Qwen3.5-9B"
+    assert cfg.seed == 1308  # overridden in sft_coach_9b.yaml (base default is 42)
     assert cfg.data.dir == "data"  # from base.yaml
     assert cfg.tracking.langfuse is True
-    assert cfg.run_name == "sft_lora"
-    assert cfg.sft.epochs == 1
+    assert cfg.run_name == "sft_coach_9b"
+    assert cfg.sft.epochs == 3
     assert cfg.lora.r > 0  # tunable hyperparameter; just verify the lora section parsed
+    assert cfg.quant.load_in_4bit is True  # QLoRA
+
+
+def test_smoke_config_parses():
+    cfg = load_sft_config(CONFIGS / "sft_lora_smoke.yaml")
+    assert cfg.sft.max_steps == 60  # smoke cap
     assert cfg.quant.load_in_4bit is False
-    assert cfg.is_multistage is False
 
 
-def test_sft_multistage_curriculum():
-    cfg = load_sft_config(CONFIGS / "sft_multistage.yaml")
-    assert cfg.is_multistage is True
-    assert cfg.quant.load_in_4bit is True  # QLoRA for T2
-    assert [s.name for s in cfg.stages] == ["broad", "reasoning"]
-    assert cfg.stages[1].reasoning_thinking is True
-    assert cfg.stages[0].mix is not None and cfg.stages[0].mix.multi_turn == 0.66
-
-
-def test_baseline_configs_isolate_axes():
-    base = CONFIGS / "baselines"
-    ls = load_sft_config(base / "sft_lora_single.yaml")
-    qs = load_sft_config(base / "sft_qlora_single.yaml")
-    lm = load_sft_config(base / "sft_lora_multi.yaml")
-    qm = load_sft_config(base / "sft_qlora_multi.yaml")
-
-    # Quant axis isolated.
-    assert ls.quant.load_in_4bit is False and qs.quant.load_in_4bit is True
-    assert lm.quant.load_in_4bit is False and qm.quant.load_in_4bit is True
-    # Stage axis isolated.
-    assert ls.is_multistage is False and qs.is_multistage is False
-    assert lm.is_multistage is True and qm.is_multistage is True
-    # Hyperparameters matched across all four corners (only the axes differ).
-    for cfg in (ls, qs, lm, qm):
-        assert cfg.seed == 1308
-        assert cfg.sft.batch_size == 8 and cfg.sft.lr == 2.0e-4
-        assert cfg.sft.use_liger_kernel is True
-        assert cfg.model.attn_implementation == "sdpa"
-
-
-def test_align_configs_select_method():
-    orpo = load_align_config(CONFIGS / "align_orpo.yaml")
-    assert orpo.align.method == "orpo"
-    assert orpo.sft_checkpoint is None  # monolithic
-
-    dpo = load_align_config(CONFIGS / "align_dpo.yaml")
+def test_align_coach_dpo_config():
+    dpo = load_align_config(CONFIGS / "align_coach_dpo.yaml")
     assert dpo.align.method == "dpo"
-    assert dpo.sft_checkpoint == "checkpoints/sft_lora/best"  # DPO needs an SFT start
+    assert dpo.sft_checkpoint == "checkpoints/sft_coach_9b/best"  # DPO needs an SFT start
     assert dpo.align.loss_type == "sigmoid"  # pref_loss
     assert dpo.align.rpo_alpha is None  # pref_ftx: 0 -> off
+    assert dpo.align.lr == 5.0e-6  # low LR for DPO
     assert dpo.train.optim == "adamw_torch"  # optimizer
-    assert dpo.train.use_liger_kernel is True  # liger_kernel
 
 
 def test_eval_config_values():

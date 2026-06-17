@@ -121,6 +121,7 @@ def _build_sft_args(config: SFTFileConfig, output_dir: Path, *, assistant_only_l
         "output_dir": str(output_dir),
         "num_train_epochs": sft.epochs,
         "per_device_train_batch_size": sft.batch_size,
+        "per_device_eval_batch_size": sft.eval_batch_size,
         "gradient_accumulation_steps": sft.grad_accum,
         "learning_rate": sft.lr,
         "warmup_ratio": sft.warmup_ratio,

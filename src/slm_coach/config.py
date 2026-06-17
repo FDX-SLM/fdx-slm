@@ -132,6 +132,9 @@ class SFTParams(TrainControlConfig):
     epochs: int = 1
     lr: float = 2.0e-4
     batch_size: int = 4
+    # Eval forward materializes fp32 logits [batch x seq x vocab]; on a big-vocab model a large
+    # eval batch OOMs. Default 1 (HF would otherwise default to 8, independent of batch_size).
+    eval_batch_size: int = 1
     grad_accum: int = 4
     max_steps: int | None = None  # caps total steps (overrides epochs); used for smoke tests
     train_on_responses_only: bool = True
@@ -141,15 +144,6 @@ class SFTParams(TrainControlConfig):
     # so eval_loss is meaningful and overfit is visible. 0.0 keeps the legacy in-sample behavior.
     val_split: float = 0.0
     mixture: MixtureConfig = Field(default_factory=MixtureConfig)
-
-
-class StageConfig(_Base):
-    """One curriculum stage in a multi-stage SFT run."""
-
-    name: str
-    include: list[str]
-    mix: MixtureConfig | None = None
-    reasoning_thinking: bool = False
 
 
 class EvalDuringTrainingConfig(_Base):
@@ -173,26 +167,20 @@ class EvalDuringTrainingConfig(_Base):
 
 
 class SFTFileConfig(BaseConfig):
-    """Schema for ``configs/sft_lora.yaml`` (T1) and ``configs/sft_multistage.yaml`` (T2)."""
+    """Schema for single-stage SFT configs (e.g. ``configs/sft_coach_9b.yaml``)."""
 
     run_name: str = "sft"
     lora: LoRAConfig = Field(default_factory=LoRAConfig)
     quant: QuantConfig = Field(default_factory=QuantConfig)
     model: ModelRuntimeConfig = Field(default_factory=ModelRuntimeConfig)
     sft: SFTParams = Field(default_factory=SFTParams)
-    stages: list[StageConfig] = Field(default_factory=list)
     eval_during_training: EvalDuringTrainingConfig = Field(default_factory=EvalDuringTrainingConfig)
-
-    @property
-    def is_multistage(self) -> bool:
-        """Whether this config declares a curriculum (more than zero stages)."""
-        return len(self.stages) > 0
 
 
 class AlignParams(_Base):
     """Alignment hyperparameters (method selected here, never hardcoded)."""
 
-    method: Literal["dpo", "orpo"] = "dpo"
+    method: Literal["dpo"] = "dpo"
     beta: float = 0.1  # pref_beta: KL/preference strength
     lr: float = 5.0e-6
     epochs: int = 1
@@ -204,7 +192,7 @@ class AlignParams(_Base):
 
 
 class AlignFileConfig(BaseConfig):
-    """Schema for ``configs/align_orpo.yaml`` / ``configs/align_dpo.yaml`` (T3)."""
+    """Schema for ``configs/align_coach_dpo.yaml`` (T3 — DPO)."""
 
     run_name: str = "align"
     lora: LoRAConfig = Field(default_factory=LoRAConfig)
