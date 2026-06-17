@@ -236,6 +236,26 @@ def test_gold_case_normalization():
     assert gc2.reference == "Trả lời"
 
 
+def test_gold_multi_turn_keeps_intermediate_assistant_context():
+    # A mid-conversation assistant turn must stay in the prompt so context isn't lost;
+    # only the gold answer turn is dropped (here it's the explicit `reference`).
+    gc = parse_gold_case(
+        {
+            "id": "g3",
+            "mode": "comparison",
+            "messages": [
+                {"role": "system", "content": "sys"},
+                {"role": "user", "content": "16 hay 16 Pro?"},
+                {"role": "assistant", "content": "Pro hơn ở 3 điểm..."},
+                {"role": "user", "content": "Anh chụp gia đình thôi."},
+            ],
+            "reference": "Vậy bản 16 là đủ ạ.",
+        }
+    )
+    assert [m["role"] for m in gc.prompt] == ["system", "user", "assistant", "user"]
+    assert gc.reference == "Vậy bản 16 là đủ ạ."
+
+
 # --- End-to-end offline mock evaluation ------------------------------------------------------
 
 

@@ -82,6 +82,26 @@ def test_parse_sft_record():
     assert rec.num_assistant_turns == 2
 
 
+def test_sft_accepts_single_turn_alias_and_ignores_extra_fields():
+    # Real delivery uses "single_turn" (alias of "single") + extra metadata fields.
+    rec = parse_record(
+        _sft(
+            conversation_type="single_turn",
+            messages=[
+                {"role": "system", "content": "sys"},
+                {"role": "user", "content": "u"},
+                {"role": "assistant", "content": "<think>x</think>\ny"},
+            ],
+            use_case="training",
+            modes_covered=["comparison", "objection_handling"],
+            customer_persona="C04",
+            source="synthetic-deepseek-v4-flash",
+        )
+    )
+    assert rec.conversation_type == "single"  # normalized
+    assert rec.num_assistant_turns == 1
+
+
 def test_parse_reasoning_record_keeps_why_field_for_audit():
     rec = parse_record(_reasoning())
     assert isinstance(rec, ReasoningRecord)

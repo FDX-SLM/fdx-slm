@@ -106,6 +106,14 @@ class SFTRecord(_CommonMeta):
     conversation_type: ConversationType = ConversationType.multi_turn
     messages: list[Message] = Field(min_length=1)
 
+    @field_validator("conversation_type", mode="before")
+    @classmethod
+    def _normalize_conversation_type(cls, value: object) -> object:
+        """Accept the common ``"single_turn"`` spelling as an alias for ``"single"``."""
+        if isinstance(value, str) and value == "single_turn":
+            return ConversationType.single.value
+        return value
+
     @field_validator("messages")
     @classmethod
     def _has_assistant_and_user(cls, messages: list[Message]) -> list[Message]:
@@ -140,7 +148,7 @@ class ReasoningRecord(_CommonMeta):
 
 
 class PreferenceRecord(_CommonMeta):
-    """Preference pair for DPO/ORPO alignment (explicit prompt + chosen/rejected)."""
+    """Preference pair for DPO alignment (explicit prompt + chosen/rejected)."""
 
     data_type: Literal["preference"]
     bad_type: str | None = None
@@ -194,13 +202,20 @@ class GoldCase(BaseModel):
             return data
         data = dict(data)
         if isinstance(data.get("messages"), list):
-            messages = data["messages"]
-            if not data.get("reference"):
-                for message in reversed(messages):
-                    if message.get("role") == "assistant":
-                        data["reference"] = message.get("content", "")
+            messages = list(data["messages"])
+            # The gold answer is the LAST assistant turn. Drop ONLY that turn (and use it as the
+            # reference if none was given) — keep any EARLIER assistant turns so multi-turn
+            # conversation context survives in the prompt.
+            if data.get("reference"):
+                if messages and messages[-1].get("role") == "assistant":
+                    messages.pop()
+            else:
+                for index in range(len(messages) - 1, -1, -1):
+                    if messages[index].get("role") == "assistant":
+                        data["reference"] = messages[index].get("content", "")
+                        messages = messages[:index]
                         break
-            data["messages"] = [m for m in messages if m.get("role") != "assistant"] or messages
+            data["messages"] = messages or data["messages"]
         else:
             for key in ("prompt", "question", "situation", "input"):
                 if key in data:

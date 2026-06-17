@@ -1,0 +1,62 @@
+# T3 — DPO alignment cho bộ data coach (cặp < 800 → DPO).
+# BẮT BUỘC khởi từ checkpoint SFT (checkpoints/sft_coach_9b/best).
+# Chạy: uv run python scripts/train_align.py --config configs/align_coach_dpo.yaml \
+#         --sft-checkpoint checkpoints/sft_coach_9b/best
+defaults: base.yaml
+
+run_name: "align_coach_dpo"
+seed: 1308
+
+# PHẢI trùng base đã dùng ở SFT (sft_coach_9b.yaml).
+model_name: "Qwen/Qwen3.5-9B"
+
+lora:
+  r: 32
+  alpha: 64
+  dropout: 0.05
+  target_modules: "all-linear"
+  bias: "none"
+
+quant:
+  load_in_4bit: true               # QLoRA — 9B 4-bit vừa thoải mái trong 32GB
+
+model:
+  max_seq_len: 1024
+  attn_implementation: "sdpa"      # KHÔNG flash-attn (kén Blackwell sm_120)
+  use_unsloth: false               # Unsloth kén sm_120 → tắt cho chắc
+  dtype: "bfloat16"
+
+align:
+  method: "dpo"
+  beta: 0.1                        # pref_beta
+  lr: 5.0e-6                       # lr THẤP cho DPO (khác SFT 2e-4) — ổn định hơn
+  epochs: 3                        # data ít → vài epoch cho có tác dụng
+  max_length: 1024                 # prompt(system~550 + user) + completion ~300
+  max_prompt_length: 768
+  loss_type: "sigmoid"
+  label_smoothing: 0.0
+  rpo_alpha: null
+
+batch_size: 1                      # 32GB + 9B → batch 1
+grad_accum: 8                      # batch hiệu dụng 8
+
+train:
+  save_steps: 10
+  eval_steps: 10
+  logging_steps: 5
+  save_total_limit: 2
+  load_best_model_at_end: true     # tự tách 10% cặp làm eval, chọn best theo eval_loss
+  metric_for_best_model: "rubric_avg"
+  greater_is_better: true
+  early_stopping_patience: 3
+  warmup_ratio: 0.03
+  weight_decay: 0.0
+  lr_scheduler_type: "cosine"
+  max_grad_norm: 1.0
+  optim: "adamw_torch"
+  gradient_checkpointing: true
+  use_liger_kernel: false          # chỉ Linux
+  max_seq_len: 1024
+
+# Điểm xuất phát DPO (cũng có thể override bằng --sft-checkpoint).
+sft_checkpoint: "checkpoints/sft_coach_9b/best"

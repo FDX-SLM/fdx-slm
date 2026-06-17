@@ -1,20 +1,14 @@
-"""Data mixing and curriculum construction for SFT.
+"""Data mixing for SFT.
 
-Two concerns:
-
-* **Single/multi-turn mixing** — sample SFT records so the multi-turn / single-turn ratio
-  matches the configured target (e.g. ~2/3 multi-turn), without replacement and seeded for
-  reproducibility.
-* **Curriculum staging** — build the ordered list of stages (e.g. stage 1 broad ``sft``;
-  stage 2 ``sft`` + ``reasoning`` with ``<think>`` folding). Each stage selects records by
-  ``include`` type and carries its mixing ratio + thinking flag for the trainer.
+**Single/multi-turn mixing** — sample SFT records so the multi-turn / single-turn ratio
+matches the configured target (e.g. ~2/3 multi-turn), without replacement and seeded for
+reproducibility.
 """
 
 from __future__ import annotations
 
 import random
 from collections.abc import Sequence
-from dataclasses import dataclass, field
 
 from slm_coach.data.schema import CanonicalRecord, Role, SFTRecord
 from slm_coach.utils.logging import get_logger
@@ -96,101 +90,6 @@ def mix_single_multi(
         extra={"n_multi": n_multi, "n_single": n_single, "target_multi_ratio": round(r_multi, 3)},
     )
     return chosen
-
-
-@dataclass
-class StageData:
-    """A single curriculum stage ready for the trainer."""
-
-    name: str
-    include: list[str]
-    records: list[CanonicalRecord] = field(default_factory=list)
-    reasoning_thinking: bool = False
-
-    def __len__(self) -> int:
-        """Number of records in the stage."""
-        return len(self.records)
-
-
-def build_stage(
-    name: str,
-    include: Sequence[str],
-    records_by_type: dict[str, Sequence[CanonicalRecord]],
-    *,
-    mix: dict[str, float] | None = None,
-    reasoning_thinking: bool = False,
-    seed: int = 42,
-) -> StageData:
-    """Assemble one curriculum stage.
-
-    Args:
-        name: Stage name (e.g. ``"broad"``).
-        include: Data types this stage trains on (e.g. ``["sft", "reasoning"]``).
-        records_by_type: Mapping of data type to its available records.
-        mix: Optional ``{"multi_turn", "single"}`` ratio applied to the ``sft`` portion.
-        reasoning_thinking: Whether reasoning records fold a ``<think>`` block in this stage.
-        seed: RNG seed for the SFT mixing.
-
-    Returns:
-        The populated :class:`StageData`.
-    """
-    stage_records: list[CanonicalRecord] = []
-    for data_type in include:
-        pool = list(records_by_type.get(data_type, []))
-        if data_type == "sft" and mix:
-            sft_pool = [r for r in pool if isinstance(r, SFTRecord)]
-            stage_records.extend(
-                mix_single_multi(
-                    sft_pool,
-                    multi_turn=mix.get("multi_turn", 1.0),
-                    single=mix.get("single", 0.0),
-                    seed=seed,
-                )
-            )
-        else:
-            stage_records.extend(pool)
-
-    stage = StageData(
-        name=name,
-        include=list(include),
-        records=stage_records,
-        reasoning_thinking=reasoning_thinking,
-    )
-    logger.info(
-        "Built curriculum stage",
-        extra={"stage": name, "include": list(include), "n_records": len(stage)},
-    )
-    return stage
-
-
-def build_curriculum(
-    stage_specs: Sequence[dict],
-    records_by_type: dict[str, Sequence[CanonicalRecord]],
-    *,
-    seed: int = 42,
-) -> list[StageData]:
-    """Build the ordered list of curriculum stages from config specs.
-
-    Args:
-        stage_specs: Ordered stage dicts as parsed from ``configs/sft_multistage.yaml``;
-            each has ``name``, ``include`` and optionally ``mix`` / ``reasoning_thinking``.
-        records_by_type: Mapping of data type to its available records.
-        seed: RNG seed for SFT mixing.
-
-    Returns:
-        Stages in curriculum order, each initialized from the previous in the trainer.
-    """
-    return [
-        build_stage(
-            name=spec["name"],
-            include=spec["include"],
-            records_by_type=records_by_type,
-            mix=spec.get("mix"),
-            reasoning_thinking=bool(spec.get("reasoning_thinking", False)),
-            seed=seed,
-        )
-        for spec in stage_specs
-    ]
 
 
 def count_modes(records: Sequence[CanonicalRecord]) -> dict[str, int]:

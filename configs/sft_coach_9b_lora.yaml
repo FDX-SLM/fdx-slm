@@ -1,0 +1,63 @@
+# SFT LoRA (16-bit) cho Qwen3.5-9B trên 1x RTX 5090 32GB (Blackwell sm_120).
+# Bản SONG SONG với sft_coach_9b.yaml để so LoRA vs QLoRA — CHỈ khác trục lượng tử hoá
+# (quant.load_in_4bit). Mọi hyperparameter khác GIỮ Y HỆT để so sánh công bằng.
+# Chạy: uv run python scripts/train_sft.py --config configs/sft_coach_9b_lora.yaml
+defaults: base.yaml
+
+run_name: "sft_coach_9b_lora"     # ← khác QLoRA → checkpoints/sft_coach_9b_lora/
+seed: 1308
+
+model_name: "Qwen/Qwen3.5-9B"
+
+lora:
+  r: 32
+  alpha: 64
+  dropout: 0.05
+  target_modules: "all-linear"
+  bias: "none"
+
+quant:
+  load_in_4bit: false             # ← LoRA 16-bit (KHÁC QLoRA). Weights bf16 ~18-20GB → SÁT TRẦN 32GB.
+
+model:
+  max_seq_len: 2048               # giữ giống QLoRA cho công bằng. OOM → hạ 1024 (và hạ QLoRA xuống 1024 luôn để vẫn fair)
+  attn_implementation: "sdpa"     # KHÔNG flash-attn (kén Blackwell)
+  use_unsloth: false              # Unsloth kén sm_120 → tắt cho chắc
+  dtype: "bfloat16"
+
+sft:
+  epochs: 3
+  lr: 2.0e-4
+  batch_size: 1
+  eval_batch_size: 1              # PHẢI để 1: eval dựng fp32 logits [b×seq×vocab]; batch 8 (mặc định HF) → OOM
+  grad_accum: 16
+  warmup_ratio: 0.03
+  weight_decay: 0.0
+  lr_scheduler_type: "cosine"
+  max_grad_norm: 1.0
+  optim: "adamw_torch"
+  gradient_checkpointing: true    # bắt buộc cho 9B/32GB
+  use_liger_kernel: false
+  max_seq_len: 2048
+  train_on_responses_only: true
+  multiturn_masking: true
+  packing: false
+  val_split: 0.05
+  save_steps: 10
+  eval_steps: 10
+  logging_steps: 5
+  save_total_limit: 2
+  load_best_model_at_end: true
+  metric_for_best_model: "rubric_avg"
+  greater_is_better: true
+  early_stopping_patience: 3
+  mixture:
+    multi_turn: 0.3
+    single: 0.7
+
+eval_during_training:
+  enabled: true
+  gold_subset: "data/gold/gold_test.jsonl"
+  subset_size: 8
+  max_new_tokens: 256
+  use_judge: false
