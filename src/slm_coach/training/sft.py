@@ -16,8 +16,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from slm_coach.data.formatting import to_sft_dataset
-from slm_coach.data.loader import load_gold_cases, load_records
-from slm_coach.data.mixture import mix_single_multi
+from slm_coach.data.loader import load_gold_cases, load_jsonl_records, load_records
 from slm_coach.tracking import init_tracking
 from slm_coach.training.callbacks import EvalDuringTraining, eval_metric_key, write_meta_json
 from slm_coach.training.model import (
@@ -220,15 +219,14 @@ def run_sft_core(
         )
         assistant_only = False
 
-    # Prefer a TRUE held-out eval set (out-of-sample) when provided; otherwise fall back to the
-    # legacy in-sample slice of the train set (eval_loss then only drives the eval cycle, not a
-    # generalization signal). Either way it's capped at subset_size to bound eval cost.
-    cap = config.eval_during_training.subset_size
+    # Prefer a TRUE held-out eval set (out-of-sample) when provided: use it IN FULL so eval_loss
+    # is a faithful, mode-covering generalization signal (decoupled from the rubric callback's
+    # subset_size, which only bounds how many samples that callback GENERATES on). Without a real
+    # holdout, fall back to a small in-sample slice (eval_loss then only drives the eval cycle).
     if val_records:
-        val_dataset = to_sft_dataset(val_records, reasoning_thinking=reasoning_thinking)
-        eval_dataset = val_dataset.select(range(min(cap, len(val_dataset)) or 1))
+        eval_dataset = to_sft_dataset(val_records, reasoning_thinking=reasoning_thinking)
     else:
-        eval_size = min(len(dataset), cap) or 1
+        eval_size = min(len(dataset), config.eval_during_training.subset_size) or 1
         eval_dataset = dataset.select(range(min(eval_size, len(dataset))))
 
     callbacks: list[Any] = []
@@ -298,6 +296,48 @@ def _export_metrics(trainer: Any, config: SFTFileConfig, output_dir: Path) -> No
         logger.warning("Could not export training metrics", extra={"error": str(exc)})
 
 
+def resolve_train_val(config: SFTFileConfig) -> tuple[list, list, int, int]:
+    """Resolve ``(train_records, val_records, n_sft, n_reasoning)`` for an SFT pass.
+
+    All approved records go into training (no single/multi-turn subsampling). Prefers a
+    materialized, mode-stratified holdout at ``data.holdout_dir`` (written by
+    ``scripts/split_holdout.py``): ``val.jsonl`` is the out-of-sample eval set and is guaranteed
+    never to appear in ``train.jsonl``. Falls back to the legacy in-memory ``sft.val_split`` when
+    no holdout is configured or its files are missing.
+    """
+    holdout = config.data.holdout_dir
+    if holdout:
+        train_path = Path(holdout) / "train.jsonl"
+        val_path = Path(holdout) / "val.jsonl"
+        if train_path.is_file() and val_path.is_file():
+            keep = config.data.keep_audit_status
+            train_all = load_jsonl_records(train_path, keep)
+            val_records = load_jsonl_records(val_path, keep)
+            n_sft = sum(1 for r in train_all if r.data_type == "sft")
+            n_reasoning = sum(1 for r in train_all if r.data_type == "reasoning")
+            logger.info(
+                "Using materialized holdout",
+                extra={
+                    "holdout_dir": holdout,
+                    "n_train": len(train_all),
+                    "n_val": len(val_records),
+                },
+            )
+            return train_all, val_records, n_sft, n_reasoning
+        logger.warning(
+            "holdout_dir set but train/val.jsonl missing; using in-memory split. "
+            "Run: uv run python scripts/split_holdout.py --config <cfg>",
+            extra={"holdout_dir": holdout},
+        )
+
+    data = load_records(config.data.dir, ("sft", "reasoning"), config.data.keep_audit_status)
+    sft_records = data["sft"]
+    reasoning_records = data["reasoning"]
+    all_records = list(sft_records) + list(reasoning_records)
+    train_records, val_records = split_holdout(all_records, config.sft.val_split, config.seed)
+    return train_records, val_records, len(sft_records), len(reasoning_records)
+
+
 def run_sft_training(
     config: SFTFileConfig,
     *,
@@ -315,29 +355,15 @@ def run_sft_training(
         Path to the best checkpoint directory.
     """
     output_dir = Path(config.output_dir) / config.run_name
-    data = load_records(config.data.dir, ("sft", "reasoning"), config.data.keep_audit_status)
-    sft_records = data["sft"]
-    reasoning_records = data["reasoning"]
-    mixed = (
-        mix_single_multi(
-            sft_records,
-            multi_turn=config.sft.mixture.multi_turn,
-            single=config.sft.mixture.single,
-            seed=config.seed,
-        )
-        if sft_records
-        else []
-    )
-    all_records = list(mixed) + list(reasoning_records)
-    train_records, val_records = split_holdout(all_records, config.sft.val_split, config.seed)
+    train_records, val_records, n_sft, n_reasoning = resolve_train_val(config)
     gold_records = load_gold_subset(config)
 
     logger.info(
         "SFT plan",
         extra={
             "run_name": config.run_name,
-            "n_sft": len(sft_records),
-            "n_reasoning": len(reasoning_records),
+            "n_sft": n_sft,
+            "n_reasoning": n_reasoning,
             "n_train": len(train_records),
             "n_val": len(val_records),
             "multiturn_masking": config.sft.multiturn_masking,

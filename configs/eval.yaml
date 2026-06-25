@@ -14,10 +14,11 @@ rubric_weights:
   language_quality: 1.0
 
 # Multi-judge LLM-as-judge: GPT + Gemini ONLY. Never Claude/DeepSeek (teacher models).
-judges: ["gpt", "gemini"]
+# judges: ["gpt", "gemini"]
+judges: ["gemini"]
 judge_models:
-  gpt: "gpt-4o"
-  gemini: "gemini-1.5-pro"
+  # gpt: "gpt-4o"
+  gemini: "gemini-2.5-flash"
 
 # Offline batch-generation decoding settings.
 generation:

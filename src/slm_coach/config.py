@@ -49,11 +49,20 @@ class ReportingConfig(_Base):
 
 
 class DataConfig(_Base):
-    """Data directory and audit-filter settings."""
+    """Data directory, audit-filter, and held-out validation settings."""
 
     dir: str = "data"
     keep_audit_status: list[str] = Field(default_factory=lambda: ["approved"])
     lang: str = "vi"
+    # Materialized, mode-stratified holdout (written by ``scripts/split_holdout.py``). When set and
+    # ``<holdout_dir>/{train,val}.jsonl`` exist, training reads them directly (val never trained on)
+    # instead of doing the legacy in-memory ``sft.val_split``. None → in-memory fallback.
+    holdout_dir: str | None = None
+    val_fraction: float = 0.10  # SFT val ≥ this fraction of the data, split EVENLY across modes
+    val_min_total: int = 200  # ...and never fewer than this many SFT val records in total
+    # Preference/DPO holdout (separate scale — preference sets are smaller than SFT).
+    pref_val_fraction: float = 0.10
+    pref_val_min_total: int = 14
 
 
 class BaseConfig(_Base):
@@ -98,13 +107,6 @@ class ModelRuntimeConfig(_Base):
     dtype: str = "bfloat16"
 
 
-class MixtureConfig(_Base):
-    """Single/multi-turn mixing ratio for SFT."""
-
-    multi_turn: float = 0.66
-    single: float = 0.34
-
-
 class TrainControlConfig(_Base):
     """Checkpointing / eval / early-stopping controls shared by SFT and alignment."""
 
@@ -143,7 +145,6 @@ class SFTParams(TrainControlConfig):
     # Fraction of training records held out as a TRUE out-of-sample eval set (never trained on),
     # so eval_loss is meaningful and overfit is visible. 0.0 keeps the legacy in-sample behavior.
     val_split: float = 0.0
-    mixture: MixtureConfig = Field(default_factory=MixtureConfig)
 
 
 class EvalDuringTrainingConfig(_Base):

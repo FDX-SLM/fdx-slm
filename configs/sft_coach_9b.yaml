@@ -1,4 +1,4 @@
-# SFT QLoRA cho Qwen3.5-9B (10B params) trên 1x RTX 5090 32GB (Blackwell sm_120).
+# SFT QLoRA cho Qwen3.5-9B (10B params) trên 1x RTX PRO 6000 Blackwell 96GB (sm_120).
 # Chạy TRÊN SERVER: uv run python scripts/train_sft.py --config configs/sft_coach_9b.yaml
 # Xem docs/RUNBOOK.md (train) + docs/METRICS.md (đọc số liệu).
 defaults: base.yaml
@@ -12,12 +12,12 @@ model_name: "Qwen/Qwen3.5-9B"
 lora:
   r: 32
   alpha: 64
-  dropout: 0.05
+  dropout: 0.1                    # tăng từ 0.05 để hãm overfit (data nhỏ so với 9B)
   target_modules: "all-linear"
   bias: "none"
 
 quant:
-  load_in_4bit: true              # QLoRA — 10B vừa thoải mái trong 32GB (bf16 sẽ sát trần)
+  load_in_4bit: true              # QLoRA — ĐÂY là biến DUY NHẤT khác bản LoRA (base ~6GB 4-bit)
 
 model:
   max_seq_len: 2048               # câu coach ngắn; 2048 dư dùng
@@ -26,34 +26,31 @@ model:
   dtype: "bfloat16"
 
 sft:
-  epochs: 3                       # data ~360 dòng train + model to → 3 epoch đủ, tránh overfit
+  epochs: 2                       # hạ còn 2: train_loss 0.31 vs eval 1.30 ở 3 epoch → đã overfit
   lr: 2.0e-4
-  batch_size: 1                   # 32GB + 10B → batch 1
-  eval_batch_size: 1              # PHẢI để 1: eval dựng fp32 logits [b×seq×vocab]; batch 8 (mặc định HF) → OOM
-  grad_accum: 16                  # batch hiệu dụng = 16 (ổn định hơn cho model to)
+  batch_size: 8                   # TRẦN THẬT = logits [b×seq×vocab≈152k]; b=16 nổ 18GB transient. b=8 → ~9GB, vừa.
+  eval_batch_size: 2              # eval dựng logits fp32 (gấp đôi bf16) → để 2 cho an toàn
+  grad_accum: 2                   # batch hiệu dụng = 8×2 = 16 (GIỮ NGUYÊN để bảo toàn LR/scheduler đã tune)
   warmup_ratio: 0.03
   weight_decay: 0.0
   lr_scheduler_type: "cosine"
   max_grad_norm: 1.0
   optim: "adamw_torch"
-  gradient_checkpointing: true    # bắt buộc cho 10B/32GB
+  gradient_checkpointing: true    # GIỮ ON (giảm activation lớp ẩn; KHÔNG giảm được logits ở LM-head)
   use_liger_kernel: false
   max_seq_len: 2048
   train_on_responses_only: true   # loss chỉ trên assistant turn (gồm khối <think>)
   multiturn_masking: true
   packing: false
   val_split: 0.05                 # giữ 5% held-out THẬT để soi overfit
-  save_steps: 10
-  eval_steps: 10
+  save_steps: 20
+  eval_steps: 20
   logging_steps: 5
   save_total_limit: 2
   load_best_model_at_end: true
-  metric_for_best_model: "rubric_avg"
-  greater_is_better: true
-  early_stopping_patience: 3
-  mixture:
-    multi_turn: 0.3
-    single: 0.7
+  metric_for_best_model: "eval_loss"   # tín hiệu sạch/đơn điệu; rubric proxy 8-mẫu quá nhiễu → early-stop non
+  greater_is_better: false             # eval_loss → thấp hơn là tốt hơn
+  early_stopping_patience: 5           # nới ra cho run ngắn (~96 step) để chịu nhiễu eval
 
 eval_during_training:
   enabled: true

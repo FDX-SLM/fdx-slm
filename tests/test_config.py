@@ -24,9 +24,11 @@ def test_sft_coach_9b_config_merges_base():
     assert cfg.data.dir == "data"  # from base.yaml
     assert cfg.tracking.langfuse is True
     assert cfg.run_name == "sft_coach_9b"
-    assert cfg.sft.epochs == 3
+    assert cfg.sft.epochs == 2
     assert cfg.lora.r > 0  # tunable hyperparameter; just verify the lora section parsed
     assert cfg.quant.load_in_4bit is True  # QLoRA
+    assert cfg.data.holdout_dir == "data/holdout"  # from base.yaml
+    assert cfg.data.val_min_total == 200
 
 
 def test_smoke_config_parses():
