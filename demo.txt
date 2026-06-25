@@ -1,0 +1,58 @@
+# ================================================================
+# KỊCH BẢN DEMO — iPhone Sales Coach (SLM)
+# Tất cả là "kịch bản 1": junior mang TÌNH HUỐNG KHÁCH tới hỏi senior.
+# (Kịch bản 2 "junior học kỹ năng" CHƯA train → không dùng.)
+#
+# Cách dùng:
+#   - Mỗi dòng (không bắt đầu bằng #) = MỘT lượt gõ vào ô chat, theo thứ tự.
+#   - REFRESH trang giữa 2 kịch bản để reset context.
+#   - Câu hỏi GIÁ/dung lượng/màu → kỳ vọng thấy 🔧 tool-call + expander "Đã tra catalog".
+#   - Giá tham chiếu (catalog còn hàng): iP13 128=11.99tr · iP14 128=13.99tr ·
+#     iP15 128=17.69tr · iP15 256=20.79tr · iP16 128=20.49tr · iP16 256=22.19tr ·
+#     iP15/16 512=giá biến động · các bản Pro=đã ngừng kinh doanh.
+# ================================================================
+
+
+# ---- KỊCH BẢN A — Khách mua máy tầm 15 triệu (mở lời → so sánh → chê giá → chốt → bảo hành)
+# Mode: purchase_intent · comparison · objection_handling · upsell · after_sales
+Khách vừa vào shop, muốn mua iPhone mới tầm 15 triệu. Em nên mở lời và hỏi nhu cầu thế nào?
+Khách phân vân giữa iPhone 14 128GB và iPhone 15 128GB. Hai máy khác nhau gì, giá chênh bao nhiêu?
+Khách thấy iPhone 15 hơi quá ngân sách, chê đắt. Em xử lý sao cho khéo?
+Khách chốt iPhone 14 128GB. Em có nên gợi thêm gì không và gợi thế nào?
+Khách hỏi iPhone 14 bảo hành bao lâu, lỡ máy lỗi tháng đầu thì đổi trả ra sao?
+
+
+# ---- KỊCH BẢN B — Khách chụp ảnh nhiều, cân dung lượng (tư vấn nhu cầu → giá → dung lượng)
+# Mode: purchase_intent · comparison · complex_query · upsell
+Khách hay chụp ảnh quay video, ngân sách 20-22 triệu, hỏi nên mua iPhone nào.
+Khách hỏi iPhone 16 bản 128GB và 256GB chênh giá bao nhiêu, nên lấy bản nào để chứa nhiều ảnh?
+Khách hỏi iPhone 16 512GB giá bao nhiêu?
+Khách lăn tăn 256GB có đủ dùng lâu dài không. Em tư vấn sao?
+
+
+# ---- KỊCH BẢN C — Khách so sánh đời cũ vs mới, nhạy giá
+# Mode: comparison · objection_handling
+Khách hỏi iPhone 13 giờ còn đáng mua không, giá bao nhiêu so với iPhone 15?
+Khách nói iPhone 13 chip cũ rồi, sợ vài năm là lỗi thời. Em trấn an thế nào?
+Khách hỏi chênh lệch giá giữa iPhone 13 và iPhone 15 có đáng để lên đời không?
+
+
+# ---- KỊCH BẢN D — Khách hỏi máy cao cấp đã ngừng kinh doanh (không bịa, chuyển hướng)
+# Mode: edge_case · complex_query · upsell
+Khách muốn mua iPhone 16 Pro 256GB, hỏi giá bao nhiêu?
+Vậy còn máy nào đang bán mà cấu hình mạnh để chơi game không em?
+Khách hỏi iPhone 16 256GB chơi game nặng có mượt không?
+
+
+# ---- KỊCH BẢN E — Khách hỏi NGOÀI iPhone (khoe scope-guard: từ chối khéo rồi kéo về)
+# Mode: edge_case (giới hạn phạm vi)
+Khách hỏi shop có bán tai nghe AirPods không.
+Khách hỏi vậy có bán điện thoại Samsung không?
+Khách quay lại hỏi iPhone 15 128GB giá bao nhiêu, còn màu gì?
+
+
+# ---- KỊCH BẢN F — Trả góp & hậu mãi (không bịa thủ tục → mời tra/chuyển kênh)
+# Mode: complex_query · after_sales
+Khách hỏi iPhone 16 128GB mua trả góp 0% được không, thủ tục thế nào? Em chưa rõ lắm.
+Khách hỏi nếu mua xong phát hiện máy lỗi thì chính sách đổi trả ra sao?
+Khách hỏi mua máy mới có được hỗ trợ chuyển dữ liệu từ máy cũ sang không?

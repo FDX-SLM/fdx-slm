@@ -44,9 +44,6 @@ sft:
   metric_for_best_model: "rubric_avg"
   greater_is_better: true
   early_stopping_patience: 2
-  mixture:
-    multi_turn: 0.66
-    single: 0.34
 
 eval_during_training:
   enabled: true

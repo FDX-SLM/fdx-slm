@@ -37,16 +37,24 @@ def load_for_inference(checkpoint: str | Path, *, dtype: str = "float16") -> tup
     torch = require("torch", "train")
     path = str(checkpoint)
     torch_dtype = getattr(torch, dtype, torch.float16)
+    # Đặt model lên GPU; không có CUDA thì None (CPU) — runner dùng mock cho máy không GPU.
+    device_map = "auto" if torch.cuda.is_available() else None
 
     try:
         peft = require("peft", "train")
-        model = peft.AutoPeftModelForCausalLM.from_pretrained(path, dtype=torch_dtype)
+        model = peft.AutoPeftModelForCausalLM.from_pretrained(
+            path, dtype=torch_dtype, device_map=device_map
+        )
         logger.info("Loaded checkpoint as PEFT adapter", extra={"path": path})
     except Exception:  # noqa: BLE001 - fall back to a plain model when not an adapter
-        model = transformers.AutoModelForCausalLM.from_pretrained(path, dtype=torch_dtype)
+        model = transformers.AutoModelForCausalLM.from_pretrained(
+            path, dtype=torch_dtype, device_map=device_map
+        )
         logger.info("Loaded checkpoint as plain model", extra={"path": path})
 
     tokenizer = transformers.AutoTokenizer.from_pretrained(path)
+    # Decoder-only + batched generation BẮT BUỘC left-padding, nếu không kết quả batch bị sai.
+    tokenizer.padding_side = "left"
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
     model.eval()

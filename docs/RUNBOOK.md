@@ -43,6 +43,21 @@ uv run python scripts/validate_data.py --data-dir data --report outputs/data_rep
 
 ---
 
+## Bước 1b — Tách holdout val (stratified theo mode)
+
+Tách tập validation **cố định, chia đều 7 mode** ra khỏi train. Chạy lại **mỗi khi data thay đổi** (vd. gen thêm lên 2k):
+```bash
+uv run python scripts/split_holdout.py --config configs/sft_coach_9b.yaml
+```
+**Tiêu thụ:** `data/{sft,reasoning,preference}/*.jsonl` (approved) — **giữ nguyên, không sửa nguồn**.
+**Sản xuất** (disjoint; val chia đều mode, cấu hình ở `base.yaml` `data:`):
+- SFT: `data/holdout/train.jsonl` + `val.jsonl` (val ≥ `max(val_min_total, val_fraction × tổng)`).
+- DPO: `data/holdout/preference_train.jsonl` + `preference_val.jsonl` (val ≥ `max(pref_val_min_total, pref_val_fraction × tổng)`).
+**Kiểm tra:** mỗi nhóm in "wrote N train + M val", val per-mode đều và đủ 7 mode (không cảnh báo "modes absent from val"). Preference quá nhỏ → bỏ qua kèm cảnh báo, DPO tự fallback split ngẫu nhiên.
+Train SFT (Bước 2/3) và DPO (Bước 5) tự đọc holdout tương ứng — val **không bao giờ** lọt vào train; chưa chạy bước này thì fallback split in-memory kèm cảnh báo.
+
+---
+
 ## Bước 2 — (Tùy chọn) Smoke test
 
 Mồi nhanh trên model nhỏ để chắc cả pipeline chạy trước khi train bản 9B:
@@ -145,6 +160,7 @@ uv run python scripts/export_model.py \
 | --- | --- | --- |
 | 0 | `uv sync --extra train --extra eval --extra viz --extra tracking` | môi trường |
 | 1 | `validate_data.py --data-dir data` | data sạch |
+| 1b | `split_holdout.py --config configs/sft_coach_9b.yaml` | `data/holdout/{train,val}.jsonl` |
 | 2 | `train_sft.py --config configs/sft_lora_smoke.yaml` | smoke OK (tùy chọn) |
 | 3 | `train_sft.py --config configs/sft_coach_9b.yaml` | `checkpoints/sft_coach_9b/best` |
 | 4 | `evaluate.py --model checkpoints/sft_coach_9b/best --run-name eval_sft` | report SFT |

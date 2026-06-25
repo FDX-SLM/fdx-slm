@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from slm_coach.data.formatting import to_preference_dataset
-from slm_coach.data.loader import load_records
+from slm_coach.data.loader import load_jsonl_records, load_records
 from slm_coach.tracking import init_tracking
 from slm_coach.training.callbacks import write_meta_json
 from slm_coach.training.model import precision_kwargs, prepare_peft_model, save_checkpoint
@@ -42,6 +42,41 @@ def _valid_kwargs(config_cls: type, kwargs: dict[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in kwargs.items() if k in valid}
 
 
+def resolve_pref_train_val(config: AlignFileConfig) -> tuple[list, list]:
+    """Resolve ``(train_records, val_records)`` for alignment.
+
+    Prefers a materialized, mode-stratified preference holdout at
+    ``<data.holdout_dir>/preference_{train,val}.jsonl`` (written by ``scripts/split_holdout.py``):
+    ``preference_val.jsonl`` covers every mode and never appears in training. Falls back to all
+    preference records with an empty val (the trainer then derives its legacy random eval split)
+    when no holdout is configured or its files are missing.
+    """
+    holdout = config.data.holdout_dir
+    if holdout:
+        train_path = Path(holdout) / "preference_train.jsonl"
+        val_path = Path(holdout) / "preference_val.jsonl"
+        if train_path.is_file() and val_path.is_file():
+            keep = config.data.keep_audit_status
+            train_records = load_jsonl_records(train_path, keep)
+            val_records = load_jsonl_records(val_path, keep)
+            logger.info(
+                "Using materialized preference holdout",
+                extra={
+                    "holdout_dir": holdout,
+                    "n_train": len(train_records),
+                    "n_val": len(val_records),
+                },
+            )
+            return train_records, val_records
+        logger.warning(
+            "holdout_dir set but preference_{train,val}.jsonl missing; using random eval split. "
+            "Run: uv run python scripts/split_holdout.py --config <cfg>",
+            extra={"holdout_dir": holdout},
+        )
+    data = load_records(config.data.dir, ("preference",), config.data.keep_audit_status)
+    return data["preference"], []
+
+
 def run_alignment(
     config: AlignFileConfig,
     *,
@@ -69,12 +104,16 @@ def run_alignment(
         raise ValueError("DPO requires an SFT checkpoint as its starting point (--sft-checkpoint).")
 
     output_dir = Path(config.output_dir) / config.run_name
-    data = load_records(config.data.dir, ("preference",), config.data.keep_audit_status)
-    preferences = data["preference"]
+    train_records, val_records = resolve_pref_train_val(config)
 
     logger.info(
         "Alignment plan",
-        extra={"method": config.align.method, "n_pref": len(preferences), "start": str(start)},
+        extra={
+            "method": config.align.method,
+            "n_pref_train": len(train_records),
+            "n_pref_val": len(val_records),
+            "start": str(start),
+        },
     )
     if dry_run:
         logger.info(
@@ -82,8 +121,11 @@ def run_alignment(
         )
         return output_dir / "best"
 
-    dataset = to_preference_dataset(preferences)
-    return _run_align_core(config, dataset, output_dir, start=start, resume=resume)
+    dataset = to_preference_dataset(train_records)
+    eval_dataset = to_preference_dataset(val_records) if val_records else None
+    return _run_align_core(
+        config, dataset, output_dir, start=start, resume=resume, eval_dataset=eval_dataset
+    )
 
 
 def _run_align_core(
@@ -93,6 +135,7 @@ def _run_align_core(
     *,
     start: str | Path | None,
     resume: str | Path | None,
+    eval_dataset: Any | None = None,
 ) -> Path:
     """Build and run the DPO trainer, then save best + last + ``meta.json``."""
     require("torch", "train")
@@ -109,19 +152,20 @@ def _run_align_core(
     )
     tracker = init_tracking(config, run_name=config.run_name)
 
-    # Best-checkpoint: hold out a small preference eval split, select best by eval_loss
-    # (alignment has no rubric callback, so eval_loss is the selection metric).
-    eval_dataset = None
+    # Best-checkpoint selection by eval_loss (alignment has no rubric callback). Prefer the
+    # materialized, mode-stratified preference holdout (passed in as `eval_dataset`); only when
+    # none was provided do we derive the legacy random 10% split from the train set.
     load_best = config.train.load_best_model_at_end
-    if load_best and len(dataset) >= 20:
-        split = dataset.train_test_split(test_size=0.1, seed=config.seed)
-        dataset, eval_dataset = split["train"], split["test"]
-    elif load_best:
-        logger.warning(
-            "Too few preference pairs for an eval split; disabling load_best_model_at_end",
-            extra={"n": len(dataset)},
-        )
-        load_best = False
+    if load_best and eval_dataset is None:
+        if len(dataset) >= 20:
+            split = dataset.train_test_split(test_size=0.1, seed=config.seed)
+            dataset, eval_dataset = split["train"], split["test"]
+        else:
+            logger.warning(
+                "Too few preference pairs for an eval split; disabling load_best_model_at_end",
+                extra={"n": len(dataset)},
+            )
+            load_best = False
 
     common = {
         "output_dir": str(output_dir),

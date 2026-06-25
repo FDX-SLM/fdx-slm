@@ -184,6 +184,51 @@ def validate_data_dir(
     return out
 
 
+def load_jsonl_records(
+    path: str | Path,
+    keep_audit_status: Sequence[str] | None = DEFAULT_KEEP_AUDIT,
+) -> list[CanonicalRecord]:
+    """Load, validate, and audit-filter canonical records from a single JSONL file.
+
+    Used to read a materialized holdout split (``data/holdout/{train,val}.jsonl``). Invalid lines
+    are skipped with a warning rather than aborting the load.
+
+    Args:
+        path: Path to a JSONL file of canonical records.
+        keep_audit_status: Allowed ``audit_status`` values; ``None`` keeps everything.
+
+    Returns:
+        The kept :class:`CanonicalRecord` objects in file order.
+
+    Raises:
+        FileNotFoundError: If ``path`` does not exist.
+    """
+    file_path = Path(path)
+    if not file_path.is_file():
+        raise FileNotFoundError(f"Record file not found: {file_path}")
+    keep = set(keep_audit_status) if keep_audit_status is not None else None
+    records: list[CanonicalRecord] = []
+    for lineno, obj in iter_jsonl(file_path):
+        try:
+            record = parse_record(obj)
+        except ValidationError as exc:
+            first = exc.errors()[0]
+            loc = ".".join(str(p) for p in first.get("loc", ()))
+            logger.warning(
+                "Skipping invalid record",
+                extra={
+                    "path": file_path.name,
+                    "line": lineno,
+                    "error": f"{loc}: {first.get('msg')}",
+                },
+            )
+            continue
+        if keep is not None and record.audit_status not in keep:
+            continue
+        records.append(record)
+    return records
+
+
 def load_gold(path: str | Path) -> list[dict]:
     """Load the gold test set as raw decoded dicts (one per line).
 

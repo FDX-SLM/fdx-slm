@@ -1,1 +1,1 @@
-"""Data loading, validation, formatting, and mixing (the repo *consumes* JSONL data)."""
+"""Data loading, validation, formatting, and holdout splitting (the repo *consumes* JSONL data)."""

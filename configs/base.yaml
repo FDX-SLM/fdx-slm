@@ -13,3 +13,8 @@ data:
   dir: "data"
   keep_audit_status: ["approved"] # only train on approved records
   lang: "vi"
+  holdout_dir: "data/holdout"     # train/val đã materialize (scripts/split_holdout.py); val không bao giờ được train
+  val_fraction: 0.10              # SFT: val ≥ 10% dữ liệu, CHIA ĐỀU 7 mode
+  val_min_total: 200              # ...và tối thiểu 200 record val
+  pref_val_fraction: 0.10         # DPO/preference: val ≥ 10%, chia đều mode
+  pref_val_min_total: 14          # ...tối thiểu 14 (≈2/mode); preference set nhỏ hơn SFT
